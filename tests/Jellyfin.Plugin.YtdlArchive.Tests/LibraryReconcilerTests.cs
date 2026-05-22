@@ -1,6 +1,7 @@
 using System.Reflection;
 using Jellyfin.Plugin.YtdlArchive.Services;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.YtdlArchive.Tests;
@@ -82,6 +83,63 @@ public sealed class LibraryReconcilerTests
         }
     }
 
+    [Fact]
+    public async Task EnsureConfiguredLibrariesAsync_CreatesConfiguredLibraryDefinitions()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        var originals = new Dictionary<string, string?>
+        {
+            ["YTDL_MUSIC_DOWNLOAD_DIR"] = Environment.GetEnvironmentVariable("YTDL_MUSIC_DOWNLOAD_DIR"),
+            ["YTDL_PODCAST_DOWNLOAD_DIR"] = Environment.GetEnvironmentVariable("YTDL_PODCAST_DOWNLOAD_DIR"),
+            ["YTDL_AUDIOBOOK_DOWNLOAD_DIR"] = Environment.GetEnvironmentVariable("YTDL_AUDIOBOOK_DOWNLOAD_DIR"),
+            ["YTDL_OTHER_DOWNLOAD_DIR"] = Environment.GetEnvironmentVariable("YTDL_OTHER_DOWNLOAD_DIR")
+        };
+
+        try
+        {
+            foreach (var name in originals.Keys)
+            {
+                Environment.SetEnvironmentVariable(name, Path.Combine(directory.FullName, name.ToLowerInvariant()));
+            }
+
+            var libraryManager = LibraryManagerProxy.Create();
+            var reconciler = new LibraryReconciler(
+                libraryManager,
+                ApplicationPathsProxy.Create(directory.FullName),
+                NullLogger<LibraryReconciler>.Instance);
+
+            await reconciler.EnsureConfiguredLibrariesAsync(CancellationToken.None);
+
+            Assert.Equal(4, ((LibraryManagerProxy)(object)libraryManager).AddedLibraries.Count);
+            Assert.All(originals.Keys, name => Assert.True(Directory.Exists(Environment.GetEnvironmentVariable(name))));
+        }
+        finally
+        {
+            foreach (var (name, value) in originals)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryDelete_IgnoresDirectoryPaths()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            InvokeStatic<object?>("TryDelete", directory.FullName);
+
+            Assert.True(Directory.Exists(directory.FullName));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static T InvokeStatic<T>(string name, params object?[] args)
     {
         var method = typeof(LibraryReconciler).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
@@ -121,5 +179,51 @@ public sealed class LibraryReconcilerTests
                 _ when targetMethod?.ReturnType == typeof(bool) => false,
                 _ => null
             };
+    }
+
+    public class LibraryManagerProxy : DispatchProxy
+    {
+        public List<string> AddedLibraries { get; } = [];
+
+        public static ILibraryManager Create()
+            => Create<ILibraryManager, LibraryManagerProxy>();
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == "GetVirtualFolders")
+            {
+                var returnType = targetMethod.ReturnType;
+                var elementType = returnType.IsArray
+                    ? returnType.GetElementType()!
+                    : returnType.GetGenericArguments().FirstOrDefault() ?? typeof(object);
+                var array = Array.CreateInstance(elementType, 0);
+                if (returnType.IsAssignableFrom(array.GetType()))
+                {
+                    return array;
+                }
+
+                return Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType));
+            }
+
+            if (targetMethod?.Name == "AddVirtualFolder")
+            {
+                AddedLibraries.Add((string)args![0]!);
+                return Task.CompletedTask;
+            }
+
+            if (targetMethod?.ReturnType == typeof(Task))
+            {
+                return Task.CompletedTask;
+            }
+
+            if (targetMethod?.ReturnType == typeof(void))
+            {
+                return null;
+            }
+
+            return targetMethod?.ReturnType.IsValueType == true
+                ? Activator.CreateInstance(targetMethod.ReturnType)
+                : null;
+        }
     }
 }

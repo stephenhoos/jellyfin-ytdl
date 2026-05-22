@@ -1,11 +1,26 @@
 using System.Reflection;
+using System.Net;
 using System.Text.Json;
+using Jellyfin.Plugin.YtdlArchive;
+using Jellyfin.Plugin.YtdlArchive.Configuration;
 using Jellyfin.Plugin.YtdlArchive.Services;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Plugins;
+using MediaBrowser.Controller;
+using MediaBrowser.Model.Serialization;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.YtdlArchive.Tests;
 
 public sealed class DownloaderHostedServiceTests
 {
+    private static readonly object PluginLock = new();
+
+    public DownloaderHostedServiceTests()
+    {
+        EnsurePluginToken(Path.GetTempPath());
+    }
+
     [Theory]
     [InlineData(null, "mp3")]
     [InlineData("", "mp3")]
@@ -89,6 +104,13 @@ public sealed class DownloaderHostedServiceTests
     }
 
     [Fact]
+    public void IsRoute_MatchesMethodCaseInsensitivelyAndPathExactly()
+    {
+        Assert.True(InvokeStatic<bool>("IsRoute", "get", "/ping", "GET", "/ping"));
+        Assert.False(InvokeStatic<bool>("IsRoute", "GET", "/Ping", "GET", "/ping"));
+    }
+
+    [Fact]
     public void FindNewestM4a_ReturnsNewestFileWrittenNearDownloadStart()
     {
         var directory = Directory.CreateTempSubdirectory();
@@ -104,6 +126,166 @@ public sealed class DownloaderHostedServiceTests
             var result = InvokeStatic<string?>("FindNewestM4a", directory.FullName, DateTime.UtcNow);
 
             Assert.Equal(newPath, result);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FindFfmpeg_UsesConfiguredExecutableWhenItExists()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        var original = Environment.GetEnvironmentVariable("JELLYFIN_FFMPEG_PATH");
+        try
+        {
+            var ffmpeg = Path.Combine(directory.FullName, "ffmpeg");
+            File.WriteAllText(ffmpeg, string.Empty);
+            Environment.SetEnvironmentVariable("JELLYFIN_FFMPEG_PATH", ffmpeg);
+
+            var result = InvokeStatic<string>("FindFfmpeg");
+
+            Assert.Equal(ffmpeg, result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("JELLYFIN_FFMPEG_PATH", original);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunDownloadAsync_FinalizesM4bWhenAudioBookDownloadSucceeds()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        var original = Environment.GetEnvironmentVariable("YTDL_AUDIOBOOK_DOWNLOAD_DIR");
+        try
+        {
+            Environment.SetEnvironmentVariable("YTDL_AUDIOBOOK_DOWNLOAD_DIR", directory.FullName);
+            var sourcePath = Path.Combine(directory.FullName, "book.m4a");
+            File.WriteAllText(sourcePath, string.Empty);
+            var ytdlp = Path.Combine(directory.FullName, OperatingSystem.IsWindows() ? "yt-dlp.cmd" : "yt-dlp");
+            File.WriteAllText(
+                ytdlp,
+                OperatingSystem.IsWindows()
+                    ? "@echo off\r\necho Audio Book\r\n"
+                    : "#!/bin/sh\necho Audio Book\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(ytdlp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            var service = new DownloaderHostedService(
+                NullLogger<DownloaderHostedService>.Instance,
+                ytdlpManager: null!,
+                libraryReconciler: null!);
+            typeof(DownloaderHostedService)
+                .GetField("_ytdlpPath", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(service, ytdlp);
+
+            await InvokeInstance<Task>(
+                service,
+                "RunDownloadAsync",
+                "https://youtu.be/dQw4w9WgXcQ",
+                "audio",
+                "m4b",
+                "audiobook",
+                null,
+                CancellationToken.None);
+
+            Assert.False(File.Exists(sourcePath));
+            Assert.True(File.Exists(Path.ChangeExtension(sourcePath, ".m4b")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("YTDL_AUDIOBOOK_DOWNLOAD_DIR", original);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StopAsync_IgnoresDisposedListener()
+    {
+        var service = new DownloaderHostedService(
+            NullLogger<DownloaderHostedService>.Instance,
+            ytdlpManager: null!,
+            libraryReconciler: null!);
+        var listener = new HttpListener();
+        listener.Close();
+        typeof(DownloaderHostedService)
+            .GetField("_listener", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(service, listener);
+
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.True(true);
+    }
+
+    [Theory]
+    [InlineData("GET", "/ping", null)]
+    [InlineData("GET", "/save-types", null)]
+    [InlineData("GET", "/status", null)]
+    [InlineData("POST", "/download", """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"flac"}""")]
+    [InlineData("POST", "/directories", """{"parent":"","name":""}""")]
+    [InlineData("POST", "/libraries/reconcile", "{}")]
+    public async Task HandleAsync_RoutesKnownApiRequests(string method, string path, string? body)
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            EnsurePluginToken(directory.FullName);
+            var service = new DownloaderHostedService(
+                NullLogger<DownloaderHostedService>.Instance,
+                new YtdlpManager(
+                    new StaticHttpClientFactory(),
+                    ServerPathsProxy.Create(directory.FullName),
+                    NullLogger<YtdlpManager>.Instance),
+                libraryReconciler: null!);
+            typeof(DownloaderHostedService)
+                .GetField("_ytdlpPath", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(service, "yt-dlp");
+
+            var (statusCode, responseBody) = await SendToHandlerAsync(service, method, path, body);
+
+            Assert.NotEqual(404, statusCode);
+            Assert.NotEqual(string.Empty, responseBody);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReadDuration_ReturnsZeroForMalformedSidecar()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var mediaPath = Path.Combine(directory.FullName, "bad.m4a");
+            File.WriteAllText(mediaPath, string.Empty);
+            File.WriteAllText(Path.ChangeExtension(mediaPath, ".info.json"), "{");
+
+            var result = InvokeStatic<TimeSpan>("ReadDuration", mediaPath);
+
+            Assert.Equal(TimeSpan.Zero, result);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryDelete_IgnoresDirectoryPaths()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            InvokeStatic<object?>("TryDelete", directory.FullName);
+
+            Assert.True(Directory.Exists(directory.FullName));
         }
         finally
         {
@@ -173,5 +355,105 @@ public sealed class DownloaderHostedServiceTests
         var method = typeof(DownloaderHostedService).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException($"{name} was not found.");
         return (T)method.Invoke(null, args)!;
+    }
+
+    private static T InvokeInstance<T>(object instance, string name, params object?[] args)
+    {
+        var method = typeof(DownloaderHostedService).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"{name} was not found.");
+        return (T)method.Invoke(instance, args)!;
+    }
+
+    private static void EnsurePluginToken(string root)
+    {
+        lock (PluginLock)
+        {
+            if (Plugin.Instance is null)
+            {
+                _ = new Plugin(ApplicationPathsProxy.Create(root), XmlSerializerProxy.Create());
+            }
+
+            var plugin = Plugin.Instance!;
+            if (plugin.Configuration is null)
+            {
+                typeof(BasePlugin<PluginConfiguration>)
+                    .GetField("_configuration", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .SetValue(plugin, new PluginConfiguration());
+            }
+
+            plugin.Configuration!.BrowserApiToken = "test-token";
+        }
+    }
+
+    private static async Task<(int StatusCode, string Body)> SendToHandlerAsync(
+        DownloaderHostedService service,
+        string method,
+        string path,
+        string? body)
+    {
+        using var listener = new HttpListener();
+        var port = Random.Shared.Next(20000, 50000);
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Start();
+        var contextTask = listener.GetContextAsync();
+
+        using var client = new HttpClient();
+        using var request = new HttpRequestMessage(new HttpMethod(method), $"http://localhost:{port}{path}");
+        request.Headers.Add("X-YtdlArchive-Token", "test-token");
+        if (body is not null)
+        {
+            request.Content = new StringContent(body);
+        }
+
+        var responseTask = client.SendAsync(request);
+        var context = await contextTask;
+        await InvokeInstance<Task>(service, "HandleAsync", context, CancellationToken.None);
+        var response = await responseTask;
+        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    private sealed class StaticHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+            => new();
+    }
+
+    public class ServerPathsProxy : DispatchProxy
+    {
+        private string _root = string.Empty;
+
+        public static IServerApplicationPaths Create(string root)
+        {
+            var proxy = Create<IServerApplicationPaths, ServerPathsProxy>();
+            ((ServerPathsProxy)(object)proxy)._root = root;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.ReturnType == typeof(string) ? _root : null;
+    }
+
+    public class ApplicationPathsProxy : DispatchProxy
+    {
+        private string _root = string.Empty;
+
+        public static IApplicationPaths Create(string root)
+        {
+            var proxy = Create<IApplicationPaths, ApplicationPathsProxy>();
+            ((ApplicationPathsProxy)(object)proxy)._root = root;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.ReturnType == typeof(string) ? _root : null;
+    }
+
+    public class XmlSerializerProxy : DispatchProxy
+    {
+        public static IXmlSerializer Create()
+            => Create<IXmlSerializer, XmlSerializerProxy>();
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.ReturnType.IsValueType == true ? Activator.CreateInstance(targetMethod.ReturnType) : null;
     }
 }
