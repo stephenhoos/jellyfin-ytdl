@@ -67,13 +67,22 @@ jobs:
           /o:"${{ vars.SONAR_ORGANIZATION }}"
           /d:sonar.token="$SONAR_TOKEN"
           /d:sonar.host.url="https://sonarcloud.io"
+          /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
           /d:sonar.scanner.scanAll=true
 
       - name: Build
         run: dotnet build JellyfinYtdl.sln --configuration Release --no-restore --no-incremental
 
       - name: Test
-        run: dotnet test JellyfinYtdl.sln --configuration Release --no-build --logger trx
+        run: >
+          dotnet test JellyfinYtdl.sln
+          --configuration Release
+          --no-build
+          --logger trx
+          --results-directory TestResults
+          --collect:"XPlat Code Coverage"
+          --
+          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       - name: End SonarQube analysis
         env:
