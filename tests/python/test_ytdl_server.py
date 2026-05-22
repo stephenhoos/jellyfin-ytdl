@@ -27,6 +27,20 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual("mp3", command[command.index("--audio-format") + 1])
         self.assertEqual("https://www.youtube.com/watch?v=dQw4w9WgXcQ", command[-1])
 
+    def test_video_command_uses_merge_output_format(self):
+        server = load_server_module()
+
+        command = server.build_ytdlp_command(
+            "https://youtu.be/dQw4w9WgXcQ",
+            "720",
+            None,
+            "video",
+        )
+
+        self.assertIn("--merge-output-format", command)
+        self.assertEqual("mp4", command[command.index("--merge-output-format") + 1])
+        self.assertEqual("https://youtu.be/dQw4w9WgXcQ", command[-1])
+
     def test_archive_directory_and_library_name_follow_target(self):
         server = load_server_module()
 
