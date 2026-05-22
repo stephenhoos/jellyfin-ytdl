@@ -1,0 +1,11 @@
+{
+  "name": "jellyfin-ytdl",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "c8 --reporter=lcov --include=extension/*.js node --test tests/js/*.test.mjs"
+  },
+  "devDependencies": {
+    "c8": "^10.1.3"
+  }
+}
