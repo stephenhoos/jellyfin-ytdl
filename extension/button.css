@@ -11,7 +11,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: #ff0000;
+  background: #cc0000;
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -28,7 +28,7 @@
   position: relative;
 }
 
-#ytdl-btn:hover  { background: #cc0000; }
+#ytdl-btn:hover  { background: #a80000; }
 #ytdl-btn:active { transform: scale(0.97); }
 
 #ytdl-btn.loading {
