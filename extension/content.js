@@ -21,15 +21,16 @@ function storageGet(defaults) {
   });
 }
 
-async function apiFetch(path, options = {}) {
+async function apiFetch(path, options) {
   const settings = await storageGet({ apiToken: '' });
-  const headers = { ...(options.headers || {}) };
+  const headers = new Headers(options?.headers);
   if (settings.apiToken) {
-    headers['X-YtdlArchive-Token'] = settings.apiToken;
+    headers.set('X-YtdlArchive-Token', settings.apiToken);
   }
 
-  const response = await fetch(`${SERVER}${path}`, { ...options, headers });
-  const payload = await response.json().catch(() => ({}));
+  const fetchOptions = options ? { ...options, headers } : { headers };
+  const response = await fetch(`${SERVER}${path}`, fetchOptions);
+  const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const tokenHint = response.status === 401 ? ' Open the extension popup and set the Browser API token from Jellyfin.' : '';
     throw new Error((payload?.error || response.statusText || 'Request failed') + tokenHint);
@@ -42,7 +43,7 @@ function loadSaveTypes() {
   if (!saveTypesLoadPromise) {
     saveTypesLoadPromise = apiFetch('/save-types')
       .then((data) => {
-        if (Array.isArray(data.saveTypes) && data.saveTypes.length > 0) {
+        if (data && Array.isArray(data.saveTypes) && data.saveTypes.length > 0) {
           saveTypes = data.saveTypes;
         }
       })
@@ -140,7 +141,7 @@ function startDownload(quality, audioFormat, target, chapterPercent) {
     body: JSON.stringify({ url, quality, audioFormat, target, chapterPercent })
   })
   .then(data => {
-    if (data.queued || data.reason === 'already downloading') {
+    if (data && (data.queued || data.reason === 'already downloading')) {
       btn.classList.remove('loading');
       btn.classList.add('done');
       txt.textContent = 'DOWNLOADING…';
@@ -148,7 +149,7 @@ function startDownload(quality, audioFormat, target, chapterPercent) {
       showToast(`⬇ Downloading to ${dir}`);
       pollStatus(url);
     } else {
-      throw new Error(data.error || 'Server error');
+      throw new Error(data?.error || 'Server error');
     }
   })
   .catch(err => {
@@ -172,6 +173,8 @@ function pollStatus(url) {
   const interval = setInterval(() => {
     apiFetch('/status')
     .then(data => {
+      if (!data) return;
+
       const entry = data[url];
       if (!entry) return;
 

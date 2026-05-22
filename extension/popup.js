@@ -24,7 +24,12 @@ function storageSet(values) {
 
 async function authHeaders() {
   const settings = await storageGet({ apiToken: '' });
-  return settings.apiToken ? { 'X-YtdlArchive-Token': settings.apiToken } : {};
+  const headers = new Headers();
+  if (settings.apiToken) {
+    headers.set('X-YtdlArchive-Token', settings.apiToken);
+  }
+
+  return headers;
 }
 
 async function checkServer() {
@@ -35,9 +40,9 @@ async function checkServer() {
   try {
     const headers = await authHeaders();
     const response = await fetch(`${SERVER}/ping`, { signal: AbortSignal.timeout(2500), headers });
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(response.status === 401 ? 'Token required' : (data.error || response.statusText || 'Request failed'));
+      throw new Error(response.status === 401 ? 'Token required' : (data?.error || response.statusText || 'Request failed'));
     }
 
     dot.className = 'dot green';
@@ -70,7 +75,7 @@ btnSaveToken.addEventListener('click', () => {
   storageSet({ apiToken: tokenInput.value.trim() }).then(() => {
     statusTitle.textContent = 'Token saved';
     statusSub.textContent = 'Checking server…';
-    checkServer();
+    void checkServer();
   });
 });
 
@@ -81,4 +86,4 @@ btnShowToken.addEventListener('click', () => {
 });
 
 btnCheck.addEventListener('click', checkServer);
-checkServer(); // auto-check on open
+await checkServer(); // auto-check on open

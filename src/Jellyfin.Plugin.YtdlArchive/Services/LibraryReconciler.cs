@@ -85,7 +85,7 @@ public sealed partial class LibraryReconciler
         string libraryName,
         string path,
         CollectionTypeOptions collectionType,
-        IReadOnlySet<string> replaceablePaths,
+        HashSet<string> replaceablePaths,
         bool enableInternetProviders)
     {
         var desiredPath = Path.GetFullPath(path);

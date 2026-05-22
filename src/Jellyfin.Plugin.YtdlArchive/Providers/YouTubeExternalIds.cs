@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.TV;
@@ -10,6 +9,8 @@ namespace Jellyfin.Plugin.YtdlArchive.Providers;
 
 public sealed class YouTubeVideoExternalId : IExternalId
 {
+    private readonly string _urlFormatString = YouTubeWatchUrlFormat;
+
     public string ProviderName => "YouTube";
 
     public string Key => Constants.YouTubeProviderKey;
@@ -18,8 +19,7 @@ public sealed class YouTubeVideoExternalId : IExternalId
 
     public static string YouTubeWatchUrlFormat => "https://www.youtube.com/watch?v={0}";
 
-    [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "Jellyfin IExternalId requires an instance UrlFormatString property.")]
-    public string UrlFormatString => YouTubeWatchUrlFormat;
+    public string UrlFormatString => _urlFormatString;
 
     public bool Supports(IHasProviderIds item)
         => item is Episode or Audio or AudioBook;
@@ -27,6 +27,8 @@ public sealed class YouTubeVideoExternalId : IExternalId
 
 public sealed class YouTubeChannelExternalId : IExternalId
 {
+    private readonly string _urlFormatString = YouTubeChannelUrlFormat;
+
     public string ProviderName => "YouTube";
 
     public string Key => Constants.YouTubeProviderKey;
@@ -35,8 +37,7 @@ public sealed class YouTubeChannelExternalId : IExternalId
 
     public static string YouTubeChannelUrlFormat => "https://www.youtube.com/channel/{0}";
 
-    [SuppressMessage("Major Code Smell", "S2325:Methods and properties that don't access instance data should be static", Justification = "Jellyfin IExternalId requires an instance UrlFormatString property.")]
-    public string UrlFormatString => YouTubeChannelUrlFormat;
+    public string UrlFormatString => _urlFormatString;
 
     public bool Supports(IHasProviderIds item)
         => item is Series or MusicAlbum;

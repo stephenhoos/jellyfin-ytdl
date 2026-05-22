@@ -571,7 +571,9 @@
                     try {
                         await downloaderPost('/libraries/reconcile', {}, configPage);
                     } catch (err) {
-                        setStatus(configPage, 'Configuration saved. Library refresh will run when Jellyfin restarts.');
+                        console.warn('YtdlArchive library reconcile failed after saving configuration.', err);
+                        const message = err instanceof Error ? err.message : 'unknown error';
+                        setStatus(configPage, `Configuration saved. Library refresh will run when Jellyfin restarts. Reconcile failed: ${message}`);
                     }
 
                     return result;
