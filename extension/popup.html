@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>YT Download Button</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      background: #0f0f0f;
+      color: #eee;
+      width: 280px;
+      padding: 0;
+      margin: 0;
+    }
+    .header {
+      background: #ff0000;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      margin: 0;
+    }
+    .header .logo { font-size: 20px; }
+    .body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #555; flex-shrink: 0;
+      transition: background .3s;
+    }
+    .dot.green { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+    .dot.red   { background: #f44336; box-shadow: 0 0 6px #f4433688; }
+    .status-text { font-size: 12px; color: #aaa; }
+    .status-text strong { color: #eee; display: block; }
+    .tip {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: #888;
+      line-height: 1.6;
+    }
+    .tip code {
+      background: #2a2a2a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #adf;
+      font-size: 11px;
+    }
+    .tip a { color: #f88; text-decoration: none; }
+    .btn-check {
+      width: 100%;
+      background: #ff0000;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 9px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-check:hover { background: #cc0000; }
+    .token-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .token-field label {
+      color: #ddd;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .token-field input {
+      background: #1f1f1f;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #fff;
+      padding: 8px;
+      font-size: 12px;
+    }
+    .token-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .version { text-align: center; font-size: 10px; color: #333; padding-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="logo">▶</span>
+    <h1>YouTube Download Button</h1>
+  </div>
+  <div class="body">
+
+    <div class="status-row">
+      <div class="dot" id="dot"></div>
+      <div class="status-text">
+        <strong id="status-title">Checking server…</strong>
+        <span id="status-sub"></span>
+      </div>
+    </div>
+
+    <button class="btn-check" id="btn-check">Check server status</button>
+
+    <div class="token-field">
+      <label for="api-token">Browser API token</label>
+      <input id="api-token" type="password" autocomplete="off" spellcheck="false">
+      <div class="token-actions">
+        <button class="btn-check" id="btn-save-token">Save token</button>
+        <button class="btn-check" id="btn-show-token">Show</button>
+      </div>
+    </div>
+
+    <div class="tip">
+      <strong style="color:#eee; display:block; margin-bottom:4px">How to use:</strong>
+      1. Make sure Jellyfin is running with the <strong>YtdlArchive</strong> plugin active.<br>
+      2. Paste the Browser API token from the Jellyfin plugin settings.<br>
+      3. Click the red <strong>DOWNLOAD</strong> button in the player controls.
+    </div>
+
+  </div>
+  <div class="version">v0.0.0.1 beta</div>
+  <script src="popup.js"></script>
+</body>
+</html>

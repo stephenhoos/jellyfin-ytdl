@@ -1,0 +1,15 @@
+bin/
+obj/
+dist/
+__pycache__/
+
+.DS_Store
+._*
+
+*.user
+*.suo
+*.swp
+
+.env
+.env.*
+*.log

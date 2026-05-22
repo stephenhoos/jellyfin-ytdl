@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>YtdlArchive</title>
+</head>
+<body>
+    <div id="YtdlArchiveConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="YtdlArchiveConfigForm">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">YtdlArchive</h2>
+                    </div>
+                    <div class="fieldDescription">YouTube archive metadata for channel folders under a Jellyfin YouTube library.</div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnsureLibrariesOnStartup" name="chkEnsureLibrariesOnStartup" type="checkbox" />
+                        <span>Create Jellyfin libraries on startup</span>
+                    </label>
+
+                    <h3 class="sectionTitle">Libraries</h3>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnsureMusicLibrary" name="chkEnsureMusicLibrary" type="checkbox" />
+                        <span>Create music library</span>
+                    </label>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtMusicLibraryName">Music library name</label>
+                        <input is="emby-input" id="txtMusicLibraryName" name="txtMusicLibraryName" type="text" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtMusicDownloadDirectory">Music download directory</label>
+                        <input is="emby-input" id="txtMusicDownloadDirectory" name="txtMusicDownloadDirectory" type="text" />
+                        <button is="emby-button" type="button" class="raised btnBrowseDirectory" data-target="txtMusicDownloadDirectory">
+                            <span>Browse</span>
+                        </button>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnsurePodcastLibrary" name="chkEnsurePodcastLibrary" type="checkbox" />
+                        <span>Create podcast library</span>
+                    </label>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtPodcastLibraryName">Podcast library name</label>
+                        <input is="emby-input" id="txtPodcastLibraryName" name="txtPodcastLibraryName" type="text" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtPodcastDownloadDirectory">Podcast download directory</label>
+                        <input is="emby-input" id="txtPodcastDownloadDirectory" name="txtPodcastDownloadDirectory" type="text" />
+                        <button is="emby-button" type="button" class="raised btnBrowseDirectory" data-target="txtPodcastDownloadDirectory">
+                            <span>Browse</span>
+                        </button>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnsureAudiobookLibrary" name="chkEnsureAudiobookLibrary" type="checkbox" />
+                        <span>Create audiobook library</span>
+                    </label>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtAudiobookLibraryName">Audiobook library name</label>
+                        <input is="emby-input" id="txtAudiobookLibraryName" name="txtAudiobookLibraryName" type="text" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtAudiobookDownloadDirectory">Audiobook download directory</label>
+                        <input is="emby-input" id="txtAudiobookDownloadDirectory" name="txtAudiobookDownloadDirectory" type="text" />
+                        <button is="emby-button" type="button" class="raised btnBrowseDirectory" data-target="txtAudiobookDownloadDirectory">
+                            <span>Browse</span>
+                        </button>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnsureOtherLibrary" name="chkEnsureOtherLibrary" type="checkbox" />
+                        <span>Create other video library</span>
+                    </label>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtOtherLibraryName">Other library name</label>
+                        <input is="emby-input" id="txtOtherLibraryName" name="txtOtherLibraryName" type="text" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtOtherDownloadDirectory">Other download directory</label>
+                        <input is="emby-input" id="txtOtherDownloadDirectory" name="txtOtherDownloadDirectory" type="text" />
+                        <button is="emby-button" type="button" class="raised btnBrowseDirectory" data-target="txtOtherDownloadDirectory">
+                            <span>Browse</span>
+                        </button>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkPreferLocalSidecars" name="chkPreferLocalSidecars" type="checkbox" />
+                        <span>Prefer local yt-dlp sidecars</span>
+                    </label>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnableRemoteMetadata" name="chkEnableRemoteMetadata" type="checkbox" />
+                        <span>Enable remote metadata fallback</span>
+                    </label>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkAutoInstallYtdlp" name="chkAutoInstallYtdlp" type="checkbox" />
+                        <span>Install yt-dlp automatically</span>
+                    </label>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkAutoUpdateYtdlp" name="chkAutoUpdateYtdlp" type="checkbox" />
+                        <span>Update managed yt-dlp when Jellyfin starts</span>
+                    </label>
+
+                    <h3 class="sectionTitle">Chrome Extension</h3>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtBrowserApiToken">Browser API token</label>
+                        <input is="emby-input" id="txtBrowserApiToken" name="txtBrowserApiToken" type="text" autocomplete="off" />
+                        <button is="emby-button" type="button" class="raised" id="btnRegenerateBrowserApiToken">
+                            <span>Regenerate</span>
+                        </button>
+                        <div class="fieldDescription">Paste this token into the Chrome extension popup. The extension fetches its save types from this plugin.</div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkAllowNonYouTubeDownloads" name="chkAllowNonYouTubeDownloads" type="checkbox" />
+                        <span>Allow non-YouTube URLs</span>
+                    </label>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtMaxConcurrentDownloads">Maximum concurrent downloads</label>
+                        <input is="emby-input" id="txtMaxConcurrentDownloads" name="txtMaxConcurrentDownloads" type="number" min="1" max="6" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtYtdlpPath">Custom yt-dlp executable path</label>
+                        <input is="emby-input" id="txtYtdlpPath" name="txtYtdlpPath" type="text" />
+                        <div class="fieldDescription">Optional. Leave blank to use the plugin-managed latest yt-dlp binary.</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtCacheDirectory">Cache directory</label>
+                        <input is="emby-input" id="txtCacheDirectory" name="txtCacheDirectory" type="text" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtCacheExpirationDays">Cache expiration days</label>
+                        <input is="emby-input" id="txtCacheExpirationDays" name="txtCacheExpirationDays" type="number" min="1" max="365" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtCookieFilePath">Cookie file path</label>
+                        <input is="emby-input" id="txtCookieFilePath" name="txtCookieFilePath" type="text" />
+                        <div class="fieldDescription">Optional. Cookies are sensitive and should be readable only by the Jellyfin process.</div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkDownloadMissingMetadataIntoCache" name="chkDownloadMissingMetadataIntoCache" type="checkbox" />
+                        <span>Download missing metadata into cache</span>
+                    </label>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkDownloadMissingThumbnailsIntoCache" name="chkDownloadMissingThumbnailsIntoCache" type="checkbox" />
+                        <span>Download missing thumbnails into cache</span>
+                    </label>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnableVerboseLogging" name="chkEnableVerboseLogging" type="checkbox" />
+                        <span>Enable verbose plugin logging</span>
+                    </label>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="selectTagImportPolicy">Tag import policy</label>
+                        <select is="emby-select" id="selectTagImportPolicy" name="selectTagImportPolicy">
+                            <option value="0">None</option>
+                            <option value="1">Conservative</option>
+                            <option value="2">All</option>
+                        </select>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="selectPeopleMappingPolicy">People mapping policy</label>
+                        <select is="emby-select" id="selectPeopleMappingPolicy" name="selectPeopleMappingPolicy">
+                            <option value="0">None</option>
+                            <option value="1">Channel as director</option>
+                            <option value="2">Channel as studio</option>
+                        </select>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="selectShortsHandlingPolicy">Shorts handling</label>
+                        <select is="emby-select" id="selectShortsHandlingPolicy" name="selectShortsHandlingPolicy">
+                            <option value="0">Include</option>
+                            <option value="1">Ignore</option>
+                            <option value="2">Mark</option>
+                        </select>
+                    </div>
+
+                    <div class="button-submit-section">
+                        <button is="emby-button" type="submit" class="raised button-submit block">
+                            <span>Save</span>
+                        </button>
+                    </div>
+
+                    <div id="YtdlArchiveStatus" class="fieldDescription" style="margin-top:2em;white-space:pre-wrap;"></div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            (function () {
+                const pluginId = '499ef0fc-f2b9-4469-aac1-bee74c3b1cfd';
+                const rootId = 'YtdlArchiveConfigPage';
+
+                function findPage(source) {
+                    if (source && source.closest) {
+                        const scopedPage = source.closest('#' + rootId);
+                        if (scopedPage) {
+                            return scopedPage;
+                        }
+                    }
+
+                    return document.querySelector('#' + rootId);
+                }
+
+                function setStatus(configPage, message) {
+                    configPage.querySelector('#YtdlArchiveStatus').textContent = message || '';
+                }
+
+                function apiUrl(path, params) {
+                    if (ApiClient.getUrl) {
+                        return ApiClient.getUrl(path, params);
+                    }
+
+                    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+                    return path + query;
+                }
+
+                function apiGet(path, params) {
+                    if (ApiClient.getJSON) {
+                        return ApiClient.getJSON(apiUrl(path, params));
+                    }
+
+                    if (ApiClient.ajax) {
+                        return ApiClient.ajax({
+                            type: 'GET',
+                            url: apiUrl(path, params),
+                            dataType: 'json'
+                        });
+                    }
+
+                    const headers = {};
+                    if (ApiClient.accessToken) {
+                        headers['X-Emby-Token'] = ApiClient.accessToken();
+                    }
+
+                    return fetch(apiUrl(path, params), { headers: headers }).then(function (response) {
+                        if (!response.ok) {
+                            throw new Error(response.statusText || 'Request failed');
+                        }
+
+                        return response.json();
+                    });
+                }
+
+                function browserApiToken(configPage) {
+                    const page = configPage || findPage(document.body);
+                    const input = page && page.querySelector('#txtBrowserApiToken');
+                    return input ? input.value.trim() : '';
+                }
+
+                function downloaderPost(path, body, configPage) {
+                    return fetch('http://localhost:9876' + path, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-YtdlArchive-Token': browserApiToken(configPage)
+                        },
+                        body: JSON.stringify(body || {})
+                    }).then(function (response) {
+                        return response.json().then(function (payload) {
+                            if (!response.ok) {
+                                throw new Error((payload && payload.error) || response.statusText || 'Request failed');
+                            }
+
+                            return payload;
+                        });
+                    });
+                }
+
+                function enumSelectValue(value, names, fallbackIndex) {
+                    if (typeof value === 'number') {
+                        return String(value);
+                    }
+
+                    const index = names.indexOf(value);
+                    return String(index >= 0 ? index : fallbackIndex);
+                }
+
+                function enumName(select, names) {
+                    const index = parseInt(select.value || '0', 10);
+                    return names[index] || names[0];
+                }
+
+                function generateBrowserApiToken() {
+                    const bytes = new Uint8Array(32);
+                    window.crypto.getRandomValues(bytes);
+                    return Array.from(bytes).map(function (byte) {
+                        return byte.toString(16).padStart(2, '0');
+                    }).join('');
+                }
+
+                function createDirectoryBrowser(configPage, input) {
+                    const overlay = document.createElement('div');
+                    overlay.style.position = 'fixed';
+                    overlay.style.inset = '0';
+                    overlay.style.zIndex = '99999';
+                    overlay.style.background = 'rgba(0,0,0,.62)';
+                    overlay.style.display = 'flex';
+                    overlay.style.alignItems = 'center';
+                    overlay.style.justifyContent = 'center';
+
+                    const dialog = document.createElement('div');
+                    dialog.className = 'ui-body-a background-theme-a';
+                    dialog.style.width = 'min(760px, 92vw)';
+                    dialog.style.maxHeight = '82vh';
+                    dialog.style.borderRadius = '6px';
+                    dialog.style.boxShadow = '0 12px 50px rgba(0,0,0,.45)';
+                    dialog.style.display = 'flex';
+                    dialog.style.flexDirection = 'column';
+
+                    dialog.innerHTML = [
+                        '<div style="padding:1em 1.25em;border-bottom:1px solid rgba(255,255,255,.12);display:flex;align-items:center;gap:.75em;">',
+                        '<h2 style="margin:0;flex:1;font-size:1.25em;">Select Directory</h2>',
+                        '<button is="emby-button" type="button" class="raised btnYtdlDirCancel"><span>Cancel</span></button>',
+                        '</div>',
+                        '<div style="padding:1em 1.25em;display:flex;gap:.5em;align-items:center;">',
+                        '<button is="emby-button" type="button" class="raised btnYtdlDirRoots"><span>Roots</span></button>',
+                        '<button is="emby-button" type="button" class="raised btnYtdlDirUp"><span>Up</span></button>',
+                        '<input is="emby-input" class="txtYtdlDirPath" type="text" style="flex:1;" />',
+                        '<button is="emby-button" type="button" class="raised btnYtdlDirGo"><span>Go</span></button>',
+                        '<button is="emby-button" type="button" class="raised btnYtdlDirNew"><span>New Folder</span></button>',
+                        '</div>',
+                        '<div class="ytdlDirError fieldDescription" style="padding:0 1.25em;color:#ffb3b3;"></div>',
+                        '<div class="paperList ytdlDirList" style="margin:1em 1.25em;overflow:auto;min-height:220px;"></div>',
+                        '<div style="padding:1em 1.25em;border-top:1px solid rgba(255,255,255,.12);display:flex;justify-content:flex-end;gap:.75em;">',
+                        '<button is="emby-button" type="button" class="raised button-submit btnYtdlDirSelect"><span>Select This Folder</span></button>',
+                        '</div>'
+                    ].join('');
+
+                    overlay.appendChild(dialog);
+                    document.body.appendChild(overlay);
+
+                    const pathInput = dialog.querySelector('.txtYtdlDirPath');
+                    const list = dialog.querySelector('.ytdlDirList');
+                    const error = dialog.querySelector('.ytdlDirError');
+                    let currentPath = input.value || '';
+
+                    function close() {
+                        overlay.remove();
+                    }
+
+                    function parentPath(path) {
+                        if (!path || path === '/') {
+                            return '';
+                        }
+
+                        const trimmed = path.replace(/\/+$/, '');
+                        const slash = trimmed.lastIndexOf('/');
+                        return slash <= 0 ? '/' : trimmed.substring(0, slash);
+                    }
+
+                    function render(items) {
+                        list.innerHTML = '';
+                        items
+                            .filter(function (item) {
+                                return item.Type === 'Directory';
+                            })
+                            .sort(function (a, b) {
+                                return (a.Name || a.Path || '').localeCompare(b.Name || b.Path || '');
+                            })
+                            .forEach(function (item) {
+                                const row = document.createElement('button');
+                                row.type = 'button';
+                                row.className = 'listItem listItem-border';
+                                row.style.width = '100%';
+                                row.style.textAlign = 'left';
+                                row.style.background = 'transparent';
+                                row.style.color = 'inherit';
+                                row.style.border = '0';
+                                row.style.cursor = 'pointer';
+                                row.innerHTML = '<div class="listItemBody two-line"><div class="listItemBodyText" dir="ltr"></div><div class="listItemBodyText secondary" dir="ltr"></div></div>';
+                                row.querySelector('.listItemBodyText').textContent = item.Name || item.Path;
+                                row.querySelector('.secondary').textContent = item.Path || '';
+                                row.addEventListener('click', function () {
+                                    loadPath(item.Path);
+                                });
+                                list.appendChild(row);
+                            });
+                    }
+
+                    function loadRoots() {
+                        error.textContent = '';
+                        pathInput.value = '';
+                        currentPath = '';
+                        list.innerHTML = '<div class="fieldDescription">Loading...</div>';
+                        apiGet('/Environment/Drives').then(render).catch(function (err) {
+                            error.textContent = (err && err.message) || 'Could not load roots.';
+                            list.innerHTML = '';
+                        });
+                    }
+
+                    function loadPath(path) {
+                        if (!path) {
+                            loadRoots();
+                            return;
+                        }
+
+                        currentPath = path;
+                        pathInput.value = path;
+                        error.textContent = '';
+                        list.innerHTML = '<div class="fieldDescription">Loading...</div>';
+                        apiGet('/Environment/DirectoryContents', {
+                            path: path,
+                            includeFiles: false,
+                            includeDirectories: true
+                        }).then(render).catch(function (err) {
+                            error.textContent = (err && err.message) || 'Could not open that directory.';
+                            list.innerHTML = '';
+                        });
+                    }
+
+                    function createFolder() {
+                        const parent = (pathInput.value || currentPath || '').trim();
+                        if (!parent) {
+                            error.textContent = 'Open a parent directory first.';
+                            return;
+                        }
+
+                        const name = window.prompt('New folder name');
+                        if (!name) {
+                            return;
+                        }
+
+                        const trimmedName = name.trim();
+                        if (!trimmedName) {
+                            error.textContent = 'Folder name is required.';
+                            return;
+                        }
+
+                        error.textContent = '';
+                        downloaderPost('/directories', {
+                            parent: parent,
+                            name: trimmedName
+                        }, configPage).then(function (result) {
+                            loadPath(result.path);
+                        }).catch(function (err) {
+                            error.textContent = (err && err.message) || 'Could not create folder.';
+                        });
+                    }
+
+                    dialog.querySelector('.btnYtdlDirCancel').addEventListener('click', close);
+                    dialog.querySelector('.btnYtdlDirRoots').addEventListener('click', loadRoots);
+                    dialog.querySelector('.btnYtdlDirUp').addEventListener('click', function () {
+                        loadPath(parentPath(currentPath || pathInput.value));
+                    });
+                    dialog.querySelector('.btnYtdlDirGo').addEventListener('click', function () {
+                        loadPath(pathInput.value.trim());
+                    });
+                    dialog.querySelector('.btnYtdlDirNew').addEventListener('click', createFolder);
+                    dialog.querySelector('.btnYtdlDirSelect').addEventListener('click', function () {
+                        input.value = (pathInput.value || currentPath || '').trim();
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        close();
+                    });
+                    pathInput.addEventListener('keydown', function (event) {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            loadPath(pathInput.value.trim());
+                        }
+                    });
+
+                    loadPath(currentPath);
+                }
+
+                function loadConfig(configPage) {
+                    if (!configPage) {
+                        return Promise.resolve();
+                    }
+
+                    Dashboard.showLoadingMsg();
+                    return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        configPage.querySelector('#chkEnsureLibrariesOnStartup').checked = config.EnsureLibrariesOnStartup !== false;
+                        configPage.querySelector('#chkEnsureMusicLibrary').checked = config.EnsureMusicLibrary !== false;
+                        configPage.querySelector('#chkEnsurePodcastLibrary').checked = config.EnsurePodcastLibrary !== false;
+                        configPage.querySelector('#chkEnsureAudiobookLibrary').checked = config.EnsureAudiobookLibrary !== false;
+                        configPage.querySelector('#chkEnsureOtherLibrary').checked = config.EnsureOtherLibrary !== false;
+                        configPage.querySelector('#txtMusicLibraryName').value = config.MusicLibraryName || 'YT-Music';
+                        configPage.querySelector('#txtMusicDownloadDirectory').value = config.MusicDownloadDirectory || '';
+                        configPage.querySelector('#txtPodcastLibraryName').value = config.PodcastLibraryName || 'YT-Podcast';
+                        configPage.querySelector('#txtPodcastDownloadDirectory').value = config.PodcastDownloadDirectory || '';
+                        configPage.querySelector('#txtAudiobookLibraryName').value = config.AudiobookLibraryName || 'YT-Audiobooks';
+                        configPage.querySelector('#txtAudiobookDownloadDirectory').value = config.AudiobookDownloadDirectory || '';
+                        configPage.querySelector('#txtOtherLibraryName').value = config.OtherLibraryName || config.VideoLibraryName || 'YT-Other';
+                        configPage.querySelector('#txtOtherDownloadDirectory').value = config.OtherDownloadDirectory || config.VideoDownloadDirectory || '';
+                        configPage.querySelector('#chkPreferLocalSidecars').checked = config.PreferLocalSidecars !== false;
+                        configPage.querySelector('#chkEnableRemoteMetadata').checked = config.EnableRemoteMetadata === true;
+                        configPage.querySelector('#chkAutoInstallYtdlp').checked = config.AutoInstallYtdlp !== false;
+                        configPage.querySelector('#chkAutoUpdateYtdlp').checked = config.AutoUpdateYtdlp !== false;
+                        configPage.querySelector('#txtBrowserApiToken').value = config.BrowserApiToken || generateBrowserApiToken();
+                        configPage.querySelector('#chkAllowNonYouTubeDownloads').checked = config.AllowNonYouTubeDownloads === true;
+                        configPage.querySelector('#txtMaxConcurrentDownloads').value = config.MaxConcurrentDownloads || 2;
+                        configPage.querySelector('#txtYtdlpPath').value = config.YtdlpPath || '';
+                        configPage.querySelector('#txtCacheDirectory').value = config.CacheDirectory || '';
+                        configPage.querySelector('#txtCacheExpirationDays').value = config.CacheExpirationDays || 30;
+                        configPage.querySelector('#txtCookieFilePath').value = config.CookieFilePath || '';
+                        configPage.querySelector('#chkDownloadMissingMetadataIntoCache').checked = config.DownloadMissingMetadataIntoCache !== false;
+                        configPage.querySelector('#chkDownloadMissingThumbnailsIntoCache').checked = config.DownloadMissingThumbnailsIntoCache !== false;
+                        configPage.querySelector('#chkEnableVerboseLogging').checked = config.EnableVerboseLogging === true;
+                        configPage.querySelector('#selectTagImportPolicy').value = enumSelectValue(config.TagImportPolicy, ['None', 'Conservative', 'All'], 2);
+                        configPage.querySelector('#selectPeopleMappingPolicy').value = enumSelectValue(config.PeopleMappingPolicy, ['None', 'ChannelAsDirector', 'ChannelAsStudio'], 2);
+                        configPage.querySelector('#selectShortsHandlingPolicy').value = enumSelectValue(config.ShortsHandlingPolicy, ['Include', 'Ignore', 'Mark'], 1);
+                        setStatus(configPage, config.EnableRemoteMetadata ? 'Remote metadata fallback is enabled.' : 'Local sidecar metadata is the primary source.');
+                    }).finally(Dashboard.hideLoadingMsg);
+                }
+
+                function saveConfig(configPage) {
+                    return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        config.PreferLocalSidecars = configPage.querySelector('#chkPreferLocalSidecars').checked;
+                        config.EnsureLibrariesOnStartup = configPage.querySelector('#chkEnsureLibrariesOnStartup').checked;
+                        config.EnsureMusicLibrary = configPage.querySelector('#chkEnsureMusicLibrary').checked;
+                        config.EnsurePodcastLibrary = configPage.querySelector('#chkEnsurePodcastLibrary').checked;
+                        config.EnsureAudiobookLibrary = configPage.querySelector('#chkEnsureAudiobookLibrary').checked;
+                        config.EnsureOtherLibrary = configPage.querySelector('#chkEnsureOtherLibrary').checked;
+                        config.MusicLibraryName = configPage.querySelector('#txtMusicLibraryName').value || 'YT-Music';
+                        config.MusicDownloadDirectory = configPage.querySelector('#txtMusicDownloadDirectory').value || '';
+                        config.PodcastLibraryName = configPage.querySelector('#txtPodcastLibraryName').value || 'YT-Podcast';
+                        config.PodcastDownloadDirectory = configPage.querySelector('#txtPodcastDownloadDirectory').value || '';
+                        config.AudiobookLibraryName = configPage.querySelector('#txtAudiobookLibraryName').value || 'YT-Audiobooks';
+                        config.AudiobookDownloadDirectory = configPage.querySelector('#txtAudiobookDownloadDirectory').value || '';
+                        config.OtherLibraryName = configPage.querySelector('#txtOtherLibraryName').value || 'YT-Other';
+                        config.OtherDownloadDirectory = configPage.querySelector('#txtOtherDownloadDirectory').value || '';
+                        config.VideoLibraryName = config.OtherLibraryName;
+                        config.VideoDownloadDirectory = config.OtherDownloadDirectory;
+                        config.EnableRemoteMetadata = configPage.querySelector('#chkEnableRemoteMetadata').checked;
+                        config.AutoInstallYtdlp = configPage.querySelector('#chkAutoInstallYtdlp').checked;
+                        config.AutoUpdateYtdlp = configPage.querySelector('#chkAutoUpdateYtdlp').checked;
+                        config.BrowserApiToken = configPage.querySelector('#txtBrowserApiToken').value || generateBrowserApiToken();
+                        config.AllowNonYouTubeDownloads = configPage.querySelector('#chkAllowNonYouTubeDownloads').checked;
+                        config.MaxConcurrentDownloads = Math.max(1, Math.min(6, parseInt(configPage.querySelector('#txtMaxConcurrentDownloads').value || '2', 10)));
+                        config.YtdlpPath = configPage.querySelector('#txtYtdlpPath').value || '';
+                        config.CacheDirectory = configPage.querySelector('#txtCacheDirectory').value || '';
+                        config.CacheExpirationDays = parseInt(configPage.querySelector('#txtCacheExpirationDays').value || '30', 10);
+                        config.CookieFilePath = configPage.querySelector('#txtCookieFilePath').value || '';
+                        config.DownloadMissingMetadataIntoCache = configPage.querySelector('#chkDownloadMissingMetadataIntoCache').checked;
+                        config.DownloadMissingThumbnailsIntoCache = configPage.querySelector('#chkDownloadMissingThumbnailsIntoCache').checked;
+                        config.EnableVerboseLogging = configPage.querySelector('#chkEnableVerboseLogging').checked;
+                        config.TagImportPolicy = enumName(configPage.querySelector('#selectTagImportPolicy'), ['None', 'Conservative', 'All']);
+                        config.PeopleMappingPolicy = enumName(configPage.querySelector('#selectPeopleMappingPolicy'), ['None', 'ChannelAsDirector', 'ChannelAsStudio']);
+                        config.ShortsHandlingPolicy = enumName(configPage.querySelector('#selectShortsHandlingPolicy'), ['Include', 'Ignore', 'Mark']);
+                        return ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                            return downloaderPost('/libraries/reconcile', {}, configPage).catch(function () {
+                                return { ok: false };
+                            }).then(function () {
+                                return result;
+                            });
+                        });
+                    });
+                }
+
+                function submitForm(event) {
+                    const form = event.target.closest && event.target.closest('#YtdlArchiveConfigForm');
+                    if (!form) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const configPage = findPage(form);
+                    Dashboard.showLoadingMsg();
+                    saveConfig(configPage).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                        setStatus(configPage, 'Configuration saved.');
+                    }).catch(function (err) {
+                        setStatus(configPage, (err && (err.message || err.Message)) || 'Configuration save failed.');
+                    }).finally(Dashboard.hideLoadingMsg);
+                }
+
+                function browseDirectory(event) {
+                    const button = event.target.closest && event.target.closest('.btnBrowseDirectory');
+                    if (!button) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const configPage = findPage(button);
+                    const input = configPage && configPage.querySelector('#' + button.getAttribute('data-target'));
+                    if (!input) {
+                        return;
+                    }
+
+                    createDirectoryBrowser(configPage, input);
+                }
+
+                function regenerateBrowserApiToken(event) {
+                    const button = event.target.closest && event.target.closest('#btnRegenerateBrowserApiToken');
+                    if (!button) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const configPage = findPage(button);
+                    const input = configPage && configPage.querySelector('#txtBrowserApiToken');
+                    if (input) {
+                        input.value = generateBrowserApiToken();
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+
+                if (!window.ytdlArchiveConfigDelegatesBound) {
+                    window.ytdlArchiveConfigDelegatesBound = true;
+                    document.addEventListener('submit', submitForm);
+                    document.addEventListener('click', browseDirectory);
+                    document.addEventListener('click', regenerateBrowserApiToken);
+                    document.addEventListener('viewshow', function (event) {
+                        const configPage = findPage(event.target);
+                        if (configPage) {
+                            loadConfig(configPage);
+                        }
+                    });
+                }
+            })();
+        </script>
+    </div>
+</body>
+</html>

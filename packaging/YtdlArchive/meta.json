@@ -1,0 +1,15 @@
+{
+  "category": "Metadata",
+  "changelog": "Initial public beta with Jellyfin-managed yt-dlp downloads, Chrome extension save targets, library creation, metadata sidecars, and a token-gated local API.",
+  "description": "Public beta for saving YouTube videos, music, podcasts, and audiobooks into Jellyfin libraries with yt-dlp sidecar metadata.",
+  "guid": "499ef0fc-f2b9-4469-aac1-bee74c3b1cfd",
+  "name": "YtdlArchive",
+  "overview": "YouTube downloader and archive metadata for Jellyfin",
+  "owner": "Stephen Hoos",
+  "targetAbi": "10.11.6.0",
+  "timestamp": "0001-01-01T00:00:00.0000000Z",
+  "version": "0.0.0.1",
+  "status": "Active",
+  "autoUpdate": false,
+  "assemblies": []
+}

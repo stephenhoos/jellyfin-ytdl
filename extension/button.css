@@ -1,0 +1,115 @@
+/* ── Download button injected into YouTube player controls ── */
+
+#ytdl-btn-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 4px;
+  vertical-align: middle;
+}
+
+#ytdl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #ff0000;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0 12px;
+  height: 36px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'YouTube Sans', 'Roboto', sans-serif;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+  user-select: none;
+  position: relative;
+}
+
+#ytdl-btn:hover  { background: #cc0000; }
+#ytdl-btn:active { transform: scale(0.97); }
+
+#ytdl-btn.loading {
+  background: #888;
+  pointer-events: none;
+}
+
+#ytdl-btn.done {
+  background: #2e7d32;
+  pointer-events: none;
+}
+
+#ytdl-btn.error {
+  background: #b71c1c;
+}
+
+#ytdl-btn .ytdl-icon { font-size: 15px; line-height: 1; }
+#ytdl-btn .ytdl-text { font-size: 12px; }
+
+/* ── Quality picker dropdown ── */
+
+#ytdl-picker {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: #212121;
+  border-radius: 8px;
+  border: 1px solid #444;
+  overflow: hidden;
+  min-width: 190px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.6);
+  z-index: 9999;
+}
+
+#ytdl-picker.open { display: block; }
+
+.ytdl-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  color: #eee;
+  font-size: 13px;
+  font-family: 'Roboto', sans-serif;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.ytdl-pick-item:hover { background: #333; }
+.ytdl-pick-item .ytdl-pick-icon { font-size: 15px; }
+.ytdl-pick-item .ytdl-pick-icon {
+  width: 24px;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* ── Toast notification ── */
+
+#ytdl-toast {
+  display: none;
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.95);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Roboto', sans-serif;
+  z-index: 99999;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+#ytdl-toast.show {
+  display: block;
+  animation: ytdl-fadein 0.2s ease, ytdl-fadeout 0.3s ease 2.7s forwards;
+}
+
+@keyframes ytdl-fadein  { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes ytdl-fadeout { from { opacity: 1; } to { opacity: 0; } }
