@@ -303,12 +303,20 @@
                     }).join('');
                 }
 
+                function trimTrailingSlashes(path) {
+                    let end = path.length;
+                    while (end > 1 && path.charAt(end - 1) === '/') {
+                        end -= 1;
+                    }
+                    return path.substring(0, end);
+                }
+
                 function parentPath(path) {
                     if (!path || path === '/') {
                         return '';
                     }
 
-                    const trimmed = path.replace(/\/+$/, '');
+                    const trimmed = trimTrailingSlashes(path);
                     const slash = trimmed.lastIndexOf('/');
                     return slash <= 0 ? '/' : trimmed.substring(0, slash);
                 }
