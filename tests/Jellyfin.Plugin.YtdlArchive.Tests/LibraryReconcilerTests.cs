@@ -32,6 +32,18 @@ public sealed class LibraryReconcilerTests
     }
 
     [Fact]
+    public void KnownManagedPaths_IncludesProvidedDefaultsAndLegacyLocations()
+    {
+        var defaultPath = Path.Combine(Path.GetTempPath(), "YT-Music");
+
+        var result = InvokeStatic<HashSet<string>>("KnownManagedPaths", new object[] { new[] { defaultPath } });
+
+        Assert.Contains(Path.GetFullPath(defaultPath), result);
+        Assert.Contains(result, path => path.EndsWith(Path.Combine("Music", "YouTube Music"), StringComparison.Ordinal));
+        Assert.Contains(result, path => path.EndsWith(Path.Combine("Downloads", "YouTube"), StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NormalizeLibraryOptions_RemovesAppleDoublePathAndSetsInternetProviderFlag()
     {
         var root = Directory.CreateTempSubdirectory();
@@ -56,8 +68,11 @@ public sealed class LibraryReconcilerTests
                 NullLogger<LibraryReconciler>.Instance);
 
             InvokeInstance(reconciler, "NormalizeLibraryOptions", "YT-Music", false);
+            var candidateRoots = InvokeInstance<IEnumerable<string>>(reconciler, "CandidateRootPaths").ToArray();
 
             var cleaned = File.ReadAllText(optionsPath);
+            Assert.Contains(Path.Combine(root.FullName, "root"), candidateRoots);
+            Assert.Contains(Path.Combine(root.FullName, "data", "..", "root"), candidateRoots);
             Assert.DoesNotContain("resource fork", cleaned, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("<EnableInternetProviders>false</EnableInternetProviders>", cleaned);
         }
@@ -74,11 +89,16 @@ public sealed class LibraryReconcilerTests
         return (T)method.Invoke(null, args)!;
     }
 
-    private static void InvokeInstance(object instance, string name, params object?[] args)
+    private static T InvokeInstance<T>(object instance, string name, params object?[] args)
     {
         var method = typeof(LibraryReconciler).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)
             ?? throw new InvalidOperationException($"{name} was not found.");
-        method.Invoke(instance, args);
+        return (T)method.Invoke(instance, args)!;
+    }
+
+    private static void InvokeInstance(object instance, string name, params object?[] args)
+    {
+        InvokeInstance<object?>(instance, name, args);
     }
 
     public class ApplicationPathsProxy : DispatchProxy

@@ -119,22 +119,31 @@ class FakeDocument {
 }
 
 function installChromeStorage(apiToken = 'token') {
+  const store = { apiToken };
   globalThis.chrome = {
     storage: {
       local: {
         get(defaults, callback) {
-          callback({ ...defaults, apiToken });
+          callback({ ...defaults, ...store });
         },
-        set(_values, callback) {
+        set(values, callback) {
+          Object.assign(store, values);
           callback();
         }
       }
     }
   };
+  return store;
 }
 
 function importFresh(path) {
   return import(`${pathToFileURL(path).href}?t=${Date.now()}-${Math.random()}`);
+}
+
+async function flushAsync(turns = 12) {
+  for (let index = 0; index < turns; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 test('content script injects the download button on watch pages', async () => {
@@ -162,6 +171,66 @@ test('content script injects the download button on watch pages', async () => {
 
   assert.ok(document.getElementById('ytdl-btn-wrap'));
   assert.equal(document.rightControls.children[0].id, 'ytdl-btn-wrap');
+});
+
+test('content script queues downloads and reports completed status', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setInterval = (callback) => {
+    callback();
+    return 1;
+  };
+  globalThis.clearInterval = () => {};
+  globalThis.setTimeout = () => {};
+  installChromeStorage();
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({
+          saveTypes: [
+            { label: 'MP3 to Music', quality: 'audio', icon: '*', audioFormat: 'mp3', target: 'music' }
+          ]
+        })
+      };
+    }
+
+    if (url.endsWith('/download')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      assert.equal(body.quality, 'audio');
+      return {
+        ok: true,
+        json: async () => ({ queued: true, saveTo: '/media/music' })
+      };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ': {
+          status: 'done',
+          title: 'Saved video'
+        }
+      })
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  const picker = document.getElementById('ytdl-picker');
+  const item = picker.children[0];
+  item.listeners.get('click')({ stopPropagation() {} });
+  await flushAsync();
+
+  assert.match(document.getElementById('ytdl-toast').textContent, /Saved video|Downloading/);
 });
 
 test('popup script reports a healthy server and saves tokens', async () => {
@@ -192,4 +261,33 @@ test('popup script reports a healthy server and saves tokens', async () => {
   assert.equal(document.getElementById('api-token').value, 'secret-token');
   assert.equal(document.getElementById('status-title').textContent, 'Server is running ✓');
   assert.match(document.getElementById('status-sub').textContent, /YT-Music/);
+
+  document.getElementById('btn-show-token').listeners.get('click')();
+  assert.equal(document.getElementById('api-token').type, 'text');
+
+  document.getElementById('api-token').value = 'new-token';
+  document.getElementById('btn-save-token').listeners.get('click')();
+  await flushAsync();
+  assert.equal(document.getElementById('status-title').textContent, 'Server is running ✓');
+});
+
+test('popup script explains missing token responses', async () => {
+  const document = new FakeDocument();
+  for (const id of ['dot', 'status-title', 'status-sub', 'btn-check', 'api-token', 'btn-save-token', 'btn-show-token']) {
+    const element = document.createElement(id === 'api-token' ? 'input' : 'div');
+    element.id = id;
+  }
+
+  globalThis.document = document;
+  installChromeStorage('');
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: 'token required' })
+  });
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(document.getElementById('status-title').textContent, 'Token required');
+  assert.match(document.getElementById('status-sub').textContent, /Browser API token/);
 });

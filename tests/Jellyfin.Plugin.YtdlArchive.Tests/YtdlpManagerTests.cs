@@ -14,6 +14,45 @@ public sealed class YtdlpManagerTests
     }
 
     [Fact]
+    public void GetDownloadUrl_UsesConfiguredReleaseBaseWithoutTrailingSlash()
+    {
+        var original = Environment.GetEnvironmentVariable("YTDLP_RELEASE_DOWNLOAD_BASE");
+        try
+        {
+            Environment.SetEnvironmentVariable("YTDLP_RELEASE_DOWNLOAD_BASE", "https://downloads.example/yt-dlp/");
+
+            var result = InvokeStatic<string>("GetDownloadUrl");
+
+            Assert.Contains("https://downloads.example/yt-dlp/", result, StringComparison.Ordinal);
+            Assert.DoesNotContain("//yt-dlp", result, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("YTDLP_RELEASE_DOWNLOAD_BASE", original);
+        }
+    }
+
+    [Fact]
+    public async Task MatchesSha256Async_ComparesDownloadedBinaryHash()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(directory.FullName, "yt-dlp");
+            await File.WriteAllTextAsync(path, "binary");
+            var expected = "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd";
+
+            var result = await InvokeStatic<Task<bool>>("MatchesSha256Async", path, expected, CancellationToken.None);
+
+            Assert.True(result);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void FindOnPath_ReturnsFirstExecutableMatch()
     {
         var directory = Directory.CreateTempSubdirectory();
@@ -48,6 +87,25 @@ public sealed class YtdlpManagerTests
             var result = InvokeStatic<string?>("FirstExisting", new object[] { new[] { missing, existing } });
 
             Assert.Equal(existing, result);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryDelete_RemovesTemporaryDownloadWhenPresent()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(directory.FullName, "partial.download");
+            File.WriteAllText(path, string.Empty);
+
+            InvokeStatic<object?>("TryDelete", path);
+
+            Assert.False(File.Exists(path));
         }
         finally
         {
