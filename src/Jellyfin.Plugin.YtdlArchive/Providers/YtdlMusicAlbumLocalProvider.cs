@@ -61,7 +61,7 @@ public sealed class YtdlMusicAlbumLocalProvider : ILocalMetadataProvider<MusicAl
             return string.Empty;
         }
 
-        var bracket = value.LastIndexOf("[", StringComparison.Ordinal);
+        var bracket = value.LastIndexOf('[');
         return bracket > 0 ? value[..bracket].Trim() : value;
     }
 }

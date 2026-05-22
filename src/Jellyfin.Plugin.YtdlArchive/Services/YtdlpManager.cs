@@ -8,6 +8,14 @@ namespace Jellyfin.Plugin.YtdlArchive.Services;
 
 public sealed class YtdlpManager
 {
+    private const string YtdlpExecutableName = "yt-dlp";
+    private const string YtdlpWindowsExecutableName = "yt-dlp.exe";
+    private const string YtdlpMacosAssetName = "yt-dlp_macos";
+    private const string ReleaseDownloadBaseEnvironmentVariable = "YTDLP_RELEASE_DOWNLOAD_BASE";
+    private const string HttpsScheme = "https";
+    private const string GitHubHost = "github.com";
+    private const string YtdlpReleaseDownloadPath = "yt-dlp/yt-dlp/releases/latest/download";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IServerApplicationPaths _applicationPaths;
     private readonly ILogger<YtdlpManager> _logger;
@@ -29,14 +37,9 @@ public sealed class YtdlpManager
     public string ManagedPath => Path.Combine(ManagedDirectory, ManagedExecutableName);
 
     private static string ManagedExecutableName
-        => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "yt-dlp.exe" : "yt-dlp";
+        => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? YtdlpWindowsExecutableName : YtdlpExecutableName;
 
-    private static string DownloadAssetName
-        => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? "yt-dlp.exe"
-            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                ? "yt-dlp_macos"
-                : "yt-dlp";
+    private static string DownloadAssetName => GetDownloadAssetName();
 
     public async Task<string?> EnsureAsync(CancellationToken cancellationToken)
     {
@@ -61,11 +64,11 @@ public sealed class YtdlpManager
                 }
             }
 
-            _resolvedPath = FindOnPath("yt-dlp")
+            _resolvedPath = FindOnPath(YtdlpExecutableName)
                 ?? FirstExisting(
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "yt-dlp"),
-                    "/usr/local/bin/yt-dlp",
-                    "/opt/homebrew/bin/yt-dlp");
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", YtdlpExecutableName),
+                    Path.Combine(Path.DirectorySeparatorChar.ToString(), "usr", "local", "bin", YtdlpExecutableName),
+                    Path.Combine(Path.DirectorySeparatorChar.ToString(), "opt", "homebrew", "bin", YtdlpExecutableName));
             return _resolvedPath;
         }
         finally
@@ -154,24 +157,37 @@ public sealed class YtdlpManager
     }
 
     private static string GetDownloadUrl()
+        => $"{ReleaseDownloadBase}/{DownloadAssetName}";
+
+    private static string GetDownloadAssetName()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+            return YtdlpWindowsExecutableName;
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+            return YtdlpMacosAssetName;
         }
 
-        return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+        return YtdlpExecutableName;
     }
+
+    private static string ReleaseDownloadBase
+        => Environment.GetEnvironmentVariable(ReleaseDownloadBaseEnvironmentVariable)?.TrimEnd('/')
+            ?? BuildDefaultReleaseDownloadBase();
+
+    private static string BuildDefaultReleaseDownloadBase()
+        => new UriBuilder(HttpsScheme, GitHubHost)
+        {
+            Path = YtdlpReleaseDownloadPath
+        }.Uri.ToString().TrimEnd('/');
 
     private static async Task<string?> GetExpectedSha256Async(HttpClient client, CancellationToken cancellationToken)
     {
         using var response = await client.GetAsync(
-            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS",
+            $"{ReleaseDownloadBase}/SHA2-256SUMS",
             cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
@@ -224,8 +240,13 @@ public sealed class YtdlpManager
                 File.Delete(path);
             }
         }
-        catch
+        catch (IOException)
         {
+            // Cleanup is best-effort; a failed update can retry on the next startup.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Cleanup is best-effort; permissions may block deleting the partial download.
         }
     }
 }

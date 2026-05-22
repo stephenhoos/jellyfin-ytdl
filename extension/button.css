@@ -79,8 +79,8 @@
 }
 
 .ytdl-pick-item:hover { background: #333; }
-.ytdl-pick-item .ytdl-pick-icon { font-size: 15px; }
 .ytdl-pick-item .ytdl-pick-icon {
+  font-size: 15px;
   width: 24px;
   text-align: center;
   font-weight: 700;

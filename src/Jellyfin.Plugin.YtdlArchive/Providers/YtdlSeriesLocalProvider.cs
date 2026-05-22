@@ -50,7 +50,7 @@ public sealed class YtdlSeriesLocalProvider : ILocalMetadataProvider<Series>
             return string.Empty;
         }
 
-        var bracket = value.LastIndexOf("[", StringComparison.Ordinal);
+        var bracket = value.LastIndexOf('[');
         return bracket > 0 ? value[..bracket].Trim() : value;
     }
 }

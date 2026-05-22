@@ -23,16 +23,16 @@ function storageGet(defaults) {
 
 async function apiFetch(path, options = {}) {
   const settings = await storageGet({ apiToken: '' });
-  const headers = Object.assign({}, options.headers || {});
+  const headers = { ...(options.headers || {}) };
   if (settings.apiToken) {
     headers['X-YtdlArchive-Token'] = settings.apiToken;
   }
 
-  const response = await fetch(`${SERVER}${path}`, Object.assign({}, options, { headers }));
+  const response = await fetch(`${SERVER}${path}`, { ...options, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const tokenHint = response.status === 401 ? ' Open the extension popup and set the Browser API token from Jellyfin.' : '';
-    throw new Error(((payload && payload.error) || response.statusText || 'Request failed') + tokenHint);
+    throw new Error((payload?.error || response.statusText || 'Request failed') + tokenHint);
   }
 
   return payload;
@@ -70,7 +70,7 @@ function showToast(msg) {
   }
   el.textContent = msg;
   el.className = '';
-  void el.offsetWidth; // force reflow to restart animation
+  el.getBoundingClientRect();
   el.className = 'show';
 }
 
@@ -129,7 +129,7 @@ function injectButton() {
 function startDownload(quality, audioFormat, target, chapterPercent) {
   const btn = document.getElementById('ytdl-btn');
   const txt = btn.querySelector('.ytdl-text');
-  const url = window.location.href.split('&')[0]; // strip extra params, keep ?v=...
+  const url = globalThis.location.href.split('&')[0]; // strip extra params, keep ?v=...
 
   btn.classList.add('loading');
   txt.textContent = 'QUEUING…';
@@ -176,7 +176,7 @@ function pollStatus(url) {
       if (!entry) return;
 
       const btn = document.getElementById('ytdl-btn');
-      const txt = btn && btn.querySelector('.ytdl-text');
+      const txt = btn?.querySelector('.ytdl-text');
 
       if (entry.status === 'done') {
         clearInterval(interval);

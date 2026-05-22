@@ -8,6 +8,12 @@ internal static class ArchiveSettings
     public const string DefaultPodcastLibraryName = "YT-Podcast";
     public const string DefaultAudiobookLibraryName = "YT-Audiobooks";
     public const string DefaultOtherLibraryName = "YT-Other";
+    public const string MusicTarget = "music";
+    public const string PodcastTarget = "podcast";
+    public const string AudiobookTarget = "audiobook";
+    public const string OtherTarget = "other";
+    public const string VideoTarget = "video";
+    public const string BookTarget = "book";
 
     public static string DefaultMusicDownloadDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -94,24 +100,24 @@ internal static class ArchiveSettings
     public static string DownloadDirectoryForTarget(string target)
         => NormalizeTarget(target) switch
         {
-            "music" => MusicDownloadDirectory,
-            "podcast" => PodcastDownloadDirectory,
-            "audiobook" => AudiobookDownloadDirectory,
-            "other" => OtherDownloadDirectory,
+            MusicTarget => MusicDownloadDirectory,
+            PodcastTarget => PodcastDownloadDirectory,
+            AudiobookTarget => AudiobookDownloadDirectory,
+            OtherTarget => OtherDownloadDirectory,
             _ => VideoDownloadDirectory
         };
 
     public static string NormalizeTarget(string? target)
         => string.IsNullOrWhiteSpace(target)
-            ? "other"
+            ? OtherTarget
             : target.Trim().ToLowerInvariant() switch
             {
-                "video" => "other",
-                "music" => "music",
-                "podcast" => "podcast",
-                "audiobook" => "audiobook",
-                "book" => "audiobook",
-                "other" => "other",
+                VideoTarget => OtherTarget,
+                MusicTarget => MusicTarget,
+                PodcastTarget => PodcastTarget,
+                AudiobookTarget => AudiobookTarget,
+                BookTarget => AudiobookTarget,
+                OtherTarget => OtherTarget,
                 _ => string.Empty
             };
 

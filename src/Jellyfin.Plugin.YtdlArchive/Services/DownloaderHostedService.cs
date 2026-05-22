@@ -14,22 +14,29 @@ public sealed class DownloaderHostedService : BackgroundService
 {
     private const int Port = 9876;
     private const string Format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best";
+    private const string AudioQuality = "audio";
+    private const string M4aFormat = "m4a";
+    private const string M4bFormat = "m4b";
+    private const string Mp3Format = "mp3";
+    private const string OpusFormat = "opus";
+    private const string ApplicationJsonContentType = "application/json";
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
 
-    private static readonly IReadOnlyDictionary<string, string> QualityFormats = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> QualityFormats = new(StringComparer.OrdinalIgnoreCase)
     {
         ["best"] = Format,
         ["1080"] = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
         ["720"] = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best",
         ["480"] = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best",
-        ["audio"] = "bestaudio/best"
+        [AudioQuality] = "bestaudio/best"
     };
 
     private static readonly HashSet<string> SupportedAudioFormats = new(StringComparer.OrdinalIgnoreCase)
     {
-        "mp3",
-        "m4a",
-        "m4b",
-        "opus"
+        Mp3Format,
+        M4aFormat,
+        M4bFormat,
+        OpusFormat
     };
 
     private static readonly HashSet<string> AllowedDownloadHosts = new(StringComparer.OrdinalIgnoreCase)
@@ -43,19 +50,19 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static readonly SaveType[] SaveTypes =
     {
-        new("Best to Other", "best", "★", "other"),
-        new("1080p to Other", "1080", "HD", "other"),
-        new("720p to Other", "720", "HD", "other"),
-        new("480p to Other", "480", "SD", "other"),
-        new("MP3 to Music", "audio", "♫", "music", "mp3"),
-        new("M4A to Music", "audio", "♫", "music", "m4a"),
-        new("Opus to Music", "audio", "♫", "music", "opus"),
-        new("MP3 to Podcast", "audio", "◉", "podcast", "mp3"),
-        new("M4A to Podcast", "audio", "◉", "podcast", "m4a"),
-        new("M4B Audiobook", "audio", "▣", "audiobook", "m4b"),
-        new("M4B Audiobook 10% chapters", "audio", "▣", "audiobook", "m4b", 10),
-        new("M4B Audiobook 20% chapters", "audio", "▣", "audiobook", "m4b", 20),
-        new("M4A to Audiobooks", "audio", "▣", "audiobook", "m4a")
+        new("Best to Other", "best", "★", ArchiveSettings.OtherTarget),
+        new("1080p to Other", "1080", "HD", ArchiveSettings.OtherTarget),
+        new("720p to Other", "720", "HD", ArchiveSettings.OtherTarget),
+        new("480p to Other", "480", "SD", ArchiveSettings.OtherTarget),
+        new("MP3 to Music", AudioQuality, "♫", ArchiveSettings.MusicTarget, Mp3Format),
+        new("M4A to Music", AudioQuality, "♫", ArchiveSettings.MusicTarget, M4aFormat),
+        new("Opus to Music", AudioQuality, "♫", ArchiveSettings.MusicTarget, OpusFormat),
+        new("MP3 to Podcast", AudioQuality, "◉", ArchiveSettings.PodcastTarget, Mp3Format),
+        new("M4A to Podcast", AudioQuality, "◉", ArchiveSettings.PodcastTarget, M4aFormat),
+        new("M4B Audiobook", AudioQuality, "▣", ArchiveSettings.AudiobookTarget, M4bFormat),
+        new("M4B Audiobook 10% chapters", AudioQuality, "▣", ArchiveSettings.AudiobookTarget, M4bFormat, 10),
+        new("M4B Audiobook 20% chapters", AudioQuality, "▣", ArchiveSettings.AudiobookTarget, M4bFormat, 20),
+        new("M4A to Audiobooks", AudioQuality, "▣", ArchiveSettings.AudiobookTarget, M4aFormat)
     };
 
     private readonly ILogger<DownloaderHostedService> _logger;
@@ -139,8 +146,9 @@ public sealed class DownloaderHostedService : BackgroundService
             _listener?.Stop();
             _listener?.Close();
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
+            _logger.LogDebug(ex, "YtdlArchive listener was already disposed during shutdown");
         }
 
         return base.StopAsync(cancellationToken);
@@ -164,8 +172,9 @@ public sealed class DownloaderHostedService : BackgroundService
 
         try
         {
-            if (context.Request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/ping")
+            var method = context.Request.HttpMethod;
+            var path = context.Request.Url?.AbsolutePath;
+            if (IsRoute(method, path, "GET", "/ping"))
             {
                 await SendJsonAsync(context.Response, 200, new
                 {
@@ -195,8 +204,7 @@ public sealed class DownloaderHostedService : BackgroundService
                 return;
             }
 
-            if (context.Request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/save-types")
+            if (IsRoute(method, path, "GET", "/save-types"))
             {
                 await SendJsonAsync(context.Response, 200, new
                 {
@@ -212,29 +220,25 @@ public sealed class DownloaderHostedService : BackgroundService
                 return;
             }
 
-            if (context.Request.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/status")
+            if (IsRoute(method, path, "GET", "/status"))
             {
                 await SendJsonAsync(context.Response, 200, _active, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            if (context.Request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/download")
+            if (IsRoute(method, path, "POST", "/download"))
             {
                 await QueueDownloadAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            if (context.Request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/directories")
+            if (IsRoute(method, path, "POST", "/directories"))
             {
                 await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            if (context.Request.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && context.Request.Url?.AbsolutePath == "/libraries/reconcile")
+            if (IsRoute(method, path, "POST", "/libraries/reconcile"))
             {
                 await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
@@ -252,7 +256,7 @@ public sealed class DownloaderHostedService : BackgroundService
         }
     }
 
-    private async Task CreateDirectoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    private static async Task CreateDirectoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
         using var body = await JsonDocument.ParseAsync(context.Request.InputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
         var root = body.RootElement;
@@ -352,7 +356,7 @@ public sealed class DownloaderHostedService : BackgroundService
             return;
         }
 
-        if (quality.Equals("audio", StringComparison.OrdinalIgnoreCase)
+        if (quality.Equals(AudioQuality, StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(audioFormat)
             && !SupportedAudioFormats.Contains(audioFormat))
         {
@@ -420,8 +424,8 @@ public sealed class DownloaderHostedService : BackgroundService
 
             if (process.ExitCode == 0)
             {
-                if (quality.Equals("audio", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(audioFormat, "m4b", StringComparison.OrdinalIgnoreCase))
+                if (quality.Equals(AudioQuality, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(audioFormat, M4bFormat, StringComparison.OrdinalIgnoreCase))
                 {
                     await FinalizeM4bAsync(target, startedUtc, chapterPercent, cancellationToken).ConfigureAwait(false);
                 }
@@ -468,13 +472,11 @@ public sealed class DownloaderHostedService : BackgroundService
         yield return "--print";
         yield return "before_dl:%(title)s";
 
-        if (quality.Equals("audio", StringComparison.OrdinalIgnoreCase))
+        if (quality.Equals(AudioQuality, StringComparison.OrdinalIgnoreCase))
         {
             yield return "--extract-audio";
             yield return "--audio-format";
-            yield return string.Equals(audioFormat, "m4b", StringComparison.OrdinalIgnoreCase)
-                ? "m4a"
-                : string.IsNullOrWhiteSpace(audioFormat) ? "mp3" : audioFormat;
+            yield return ResolveAudioFormat(audioFormat);
             yield return "--audio-quality";
             yield return "0";
             yield return "--embed-metadata";
@@ -486,6 +488,16 @@ public sealed class DownloaderHostedService : BackgroundService
         }
 
         yield return url;
+    }
+
+    private static string ResolveAudioFormat(string? audioFormat)
+    {
+        if (string.Equals(audioFormat, M4bFormat, StringComparison.OrdinalIgnoreCase))
+        {
+            return M4aFormat;
+        }
+
+        return string.IsNullOrWhiteSpace(audioFormat) ? Mp3Format : audioFormat;
     }
 
     private static string ArchiveDirectoryForTarget(string target)
@@ -612,10 +624,18 @@ public sealed class DownloaderHostedService : BackgroundService
         try
         {
             using var stream = File.OpenRead(infoPath);
-            var info = JsonSerializer.Deserialize<YtdlpInfoJson>(stream, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var info = JsonSerializer.Deserialize<YtdlpInfoJson>(stream, WebJsonOptions);
             return info?.DurationSeconds is > 0 ? TimeSpan.FromSeconds(info.DurationSeconds.Value) : TimeSpan.Zero;
         }
-        catch
+        catch (IOException)
+        {
+            return TimeSpan.Zero;
+        }
+        catch (JsonException)
+        {
+            return TimeSpan.Zero;
+        }
+        catch (UnauthorizedAccessException)
         {
             return TimeSpan.Zero;
         }
@@ -623,7 +643,8 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static string FindFfmpeg()
     {
-        const string jellyfinFfmpeg = "/Applications/Jellyfin.app/Contents/MacOS/ffmpeg";
+        var jellyfinFfmpeg = Environment.GetEnvironmentVariable("JELLYFIN_FFMPEG_PATH")
+            ?? Path.Combine(Path.DirectorySeparatorChar.ToString(), "Applications", "Jellyfin.app", "Contents", "MacOS", "ffmpeg");
         return File.Exists(jellyfinFfmpeg) ? jellyfinFfmpeg : "ffmpeg";
     }
 
@@ -643,8 +664,13 @@ public sealed class DownloaderHostedService : BackgroundService
                 File.Delete(path);
             }
         }
-        catch
+        catch (IOException)
         {
+            // Best-effort cleanup; a leftover temp file should not fail the download.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup; file permissions may prevent deleting temporary output.
         }
     }
 
@@ -777,6 +803,10 @@ public sealed class DownloaderHostedService : BackgroundService
         response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-YtdlArchive-Token";
     }
 
+    private static bool IsRoute(string actualMethod, string? actualPath, string expectedMethod, string expectedPath)
+        => actualMethod.Equals(expectedMethod, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(actualPath, expectedPath, StringComparison.Ordinal);
+
     private static bool IsAllowedCorsOrigin(string? origin)
     {
         if (string.IsNullOrWhiteSpace(origin))
@@ -802,9 +832,9 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static async Task SendJsonAsync(HttpListenerResponse response, int statusCode, object value, CancellationToken cancellationToken)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, WebJsonOptions);
         response.StatusCode = statusCode;
-        response.ContentType = "application/json";
+        response.ContentType = ApplicationJsonContentType;
         response.ContentLength64 = bytes.Length;
         await response.OutputStream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         response.Close();

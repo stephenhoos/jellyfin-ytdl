@@ -291,16 +291,59 @@
                 }
 
                 function enumName(select, names) {
-                    const index = parseInt(select.value || '0', 10);
+                    const index = Number.parseInt(select.value || '0', 10);
                     return names[index] || names[0];
                 }
 
                 function generateBrowserApiToken() {
                     const bytes = new Uint8Array(32);
-                    window.crypto.getRandomValues(bytes);
+                    globalThis.crypto.getRandomValues(bytes);
                     return Array.from(bytes).map(function (byte) {
                         return byte.toString(16).padStart(2, '0');
                     }).join('');
+                }
+
+                function parentPath(path) {
+                    if (!path || path === '/') {
+                        return '';
+                    }
+
+                    const trimmed = path.replace(/\/+$/, '');
+                    const slash = trimmed.lastIndexOf('/');
+                    return slash <= 0 ? '/' : trimmed.substring(0, slash);
+                }
+
+                function createDirectoryRow(item, loadPath) {
+                    const row = document.createElement('button');
+                    row.type = 'button';
+                    row.className = 'listItem listItem-border';
+                    row.style.width = '100%';
+                    row.style.textAlign = 'left';
+                    row.style.background = 'transparent';
+                    row.style.color = 'inherit';
+                    row.style.border = '0';
+                    row.style.cursor = 'pointer';
+                    row.innerHTML = '<div class="listItemBody two-line"><div class="listItemBodyText" dir="ltr"></div><div class="listItemBodyText secondary" dir="ltr"></div></div>';
+                    row.querySelector('.listItemBodyText').textContent = item.Name || item.Path;
+                    row.querySelector('.secondary').textContent = item.Path || '';
+                    row.addEventListener('click', function () {
+                        loadPath(item.Path);
+                    });
+                    return row;
+                }
+
+                function renderDirectoryItems(list, items, loadPath) {
+                    list.innerHTML = '';
+                    items
+                        .filter(function (item) {
+                            return item.Type === 'Directory';
+                        })
+                        .sort(function (a, b) {
+                            return (a.Name || a.Path || '').localeCompare(b.Name || b.Path || '');
+                        })
+                        .forEach(function (item) {
+                            list.appendChild(createDirectoryRow(item, loadPath));
+                        });
                 }
 
                 function createDirectoryBrowser(configPage, input) {
@@ -353,43 +396,8 @@
                         overlay.remove();
                     }
 
-                    function parentPath(path) {
-                        if (!path || path === '/') {
-                            return '';
-                        }
-
-                        const trimmed = path.replace(/\/+$/, '');
-                        const slash = trimmed.lastIndexOf('/');
-                        return slash <= 0 ? '/' : trimmed.substring(0, slash);
-                    }
-
                     function render(items) {
-                        list.innerHTML = '';
-                        items
-                            .filter(function (item) {
-                                return item.Type === 'Directory';
-                            })
-                            .sort(function (a, b) {
-                                return (a.Name || a.Path || '').localeCompare(b.Name || b.Path || '');
-                            })
-                            .forEach(function (item) {
-                                const row = document.createElement('button');
-                                row.type = 'button';
-                                row.className = 'listItem listItem-border';
-                                row.style.width = '100%';
-                                row.style.textAlign = 'left';
-                                row.style.background = 'transparent';
-                                row.style.color = 'inherit';
-                                row.style.border = '0';
-                                row.style.cursor = 'pointer';
-                                row.innerHTML = '<div class="listItemBody two-line"><div class="listItemBodyText" dir="ltr"></div><div class="listItemBodyText secondary" dir="ltr"></div></div>';
-                                row.querySelector('.listItemBodyText').textContent = item.Name || item.Path;
-                                row.querySelector('.secondary').textContent = item.Path || '';
-                                row.addEventListener('click', function () {
-                                    loadPath(item.Path);
-                                });
-                                list.appendChild(row);
-                            });
+                        renderDirectoryItems(list, items, loadPath);
                     }
 
                     function loadRoots() {
@@ -430,7 +438,7 @@
                             return;
                         }
 
-                        const name = window.prompt('New folder name');
+                        const name = globalThis.prompt('New folder name');
                         if (!name) {
                             return;
                         }
@@ -517,8 +525,8 @@
                     }).finally(Dashboard.hideLoadingMsg);
                 }
 
-                function saveConfig(configPage) {
-                    return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                async function saveConfig(configPage) {
+                    const config = await ApiClient.getPluginConfiguration(pluginId);
                         config.PreferLocalSidecars = configPage.querySelector('#chkPreferLocalSidecars').checked;
                         config.EnsureLibrariesOnStartup = configPage.querySelector('#chkEnsureLibrariesOnStartup').checked;
                         config.EnsureMusicLibrary = configPage.querySelector('#chkEnsureMusicLibrary').checked;
@@ -540,10 +548,10 @@
                         config.AutoUpdateYtdlp = configPage.querySelector('#chkAutoUpdateYtdlp').checked;
                         config.BrowserApiToken = configPage.querySelector('#txtBrowserApiToken').value || generateBrowserApiToken();
                         config.AllowNonYouTubeDownloads = configPage.querySelector('#chkAllowNonYouTubeDownloads').checked;
-                        config.MaxConcurrentDownloads = Math.max(1, Math.min(6, parseInt(configPage.querySelector('#txtMaxConcurrentDownloads').value || '2', 10)));
+                        config.MaxConcurrentDownloads = Math.max(1, Math.min(6, Number.parseInt(configPage.querySelector('#txtMaxConcurrentDownloads').value || '2', 10)));
                         config.YtdlpPath = configPage.querySelector('#txtYtdlpPath').value || '';
                         config.CacheDirectory = configPage.querySelector('#txtCacheDirectory').value || '';
-                        config.CacheExpirationDays = parseInt(configPage.querySelector('#txtCacheExpirationDays').value || '30', 10);
+                        config.CacheExpirationDays = Number.parseInt(configPage.querySelector('#txtCacheExpirationDays').value || '30', 10);
                         config.CookieFilePath = configPage.querySelector('#txtCookieFilePath').value || '';
                         config.DownloadMissingMetadataIntoCache = configPage.querySelector('#chkDownloadMissingMetadataIntoCache').checked;
                         config.DownloadMissingThumbnailsIntoCache = configPage.querySelector('#chkDownloadMissingThumbnailsIntoCache').checked;
@@ -551,18 +559,18 @@
                         config.TagImportPolicy = enumName(configPage.querySelector('#selectTagImportPolicy'), ['None', 'Conservative', 'All']);
                         config.PeopleMappingPolicy = enumName(configPage.querySelector('#selectPeopleMappingPolicy'), ['None', 'ChannelAsDirector', 'ChannelAsStudio']);
                         config.ShortsHandlingPolicy = enumName(configPage.querySelector('#selectShortsHandlingPolicy'), ['Include', 'Ignore', 'Mark']);
-                        return ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
-                            return downloaderPost('/libraries/reconcile', {}, configPage).catch(function () {
-                                return { ok: false };
-                            }).then(function () {
-                                return result;
-                            });
-                        });
-                    });
+                    const result = await ApiClient.updatePluginConfiguration(pluginId, config);
+                    try {
+                        await downloaderPost('/libraries/reconcile', {}, configPage);
+                    } catch (err) {
+                        setStatus(configPage, 'Configuration saved. Library refresh will run when Jellyfin restarts.');
+                    }
+
+                    return result;
                 }
 
                 function submitForm(event) {
-                    const form = event.target.closest && event.target.closest('#YtdlArchiveConfigForm');
+                    const form = event.target.closest?.('#YtdlArchiveConfigForm');
                     if (!form) {
                         return;
                     }
@@ -579,14 +587,14 @@
                 }
 
                 function browseDirectory(event) {
-                    const button = event.target.closest && event.target.closest('.btnBrowseDirectory');
+                    const button = event.target.closest?.('.btnBrowseDirectory');
                     if (!button) {
                         return;
                     }
 
                     event.preventDefault();
                     const configPage = findPage(button);
-                    const input = configPage && configPage.querySelector('#' + button.getAttribute('data-target'));
+                    const input = configPage && configPage.querySelector('#' + button.dataset.target);
                     if (!input) {
                         return;
                     }
@@ -595,7 +603,7 @@
                 }
 
                 function regenerateBrowserApiToken(event) {
-                    const button = event.target.closest && event.target.closest('#btnRegenerateBrowserApiToken');
+                    const button = event.target.closest?.('#btnRegenerateBrowserApiToken');
                     if (!button) {
                         return;
                     }
@@ -609,8 +617,8 @@
                     }
                 }
 
-                if (!window.ytdlArchiveConfigDelegatesBound) {
-                    window.ytdlArchiveConfigDelegatesBound = true;
+                if (!globalThis.ytdlArchiveConfigDelegatesBound) {
+                    globalThis.ytdlArchiveConfigDelegatesBound = true;
                     document.addEventListener('submit', submitForm);
                     document.addEventListener('click', browseDirectory);
                     document.addEventListener('click', regenerateBrowserApiToken);

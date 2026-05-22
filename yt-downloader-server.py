@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 PORT        = 9876
+JSON_CONTENT_TYPE = 'application/json'
 DOWNLOAD_DIR = Path(os.environ.get('YTDL_DOWNLOAD_DIR', Path.home() / 'Downloads' / 'YouTube')).expanduser()
 MUSIC_DOWNLOAD_DIR = Path(os.environ.get('YTDL_MUSIC_DOWNLOAD_DIR', Path.home() / 'Music' / 'YouTube Music')).expanduser()
 
@@ -115,8 +116,8 @@ def jellyfin_request(method, path, query=None, body=None):
     payload = None
     headers = {
         'X-Emby-Token': JELLYFIN_API_KEY,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        'Content-Type': JSON_CONTENT_TYPE,
+        'Accept': JSON_CONTENT_TYPE,
     }
     if body is not None:
         payload = json.dumps(body).encode()
@@ -127,7 +128,7 @@ def jellyfin_request(method, path, query=None, body=None):
         if not data:
             return None
         content_type = response.headers.get('Content-Type', '')
-        if 'application/json' in content_type:
+        if JSON_CONTENT_TYPE in content_type:
             return json.loads(data.decode())
         return data.decode()
 
@@ -250,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_json(self, code, data):
         body = json.dumps(data).encode()
         self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', JSON_CONTENT_TYPE)
         self.send_header('Content-Length', str(len(body)))
         origin = self.headers.get('Origin', '')
         if origin == 'null' or origin.startswith(('chrome-extension://', 'moz-extension://')) or origin in {

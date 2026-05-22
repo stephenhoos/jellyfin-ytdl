@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.YtdlArchive.Services;
 
-public sealed class LibraryReconciler
+public sealed partial class LibraryReconciler
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IApplicationPaths _applicationPaths;
@@ -44,8 +44,7 @@ public sealed class LibraryReconciler
                 ArchiveSettings.MusicDownloadDirectory,
                 CollectionTypeOptions.music,
                 KnownManagedPaths(ArchiveSettings.DefaultMusicDownloadDirectory),
-                ArchiveSettings.EnableRemoteMetadata,
-                cancellationToken).ConfigureAwait(false);
+                ArchiveSettings.EnableRemoteMetadata).ConfigureAwait(false);
         }
 
         if (ArchiveSettings.EnsurePodcastLibrary)
@@ -55,8 +54,7 @@ public sealed class LibraryReconciler
                 ArchiveSettings.PodcastDownloadDirectory,
                 CollectionTypeOptions.music,
                 KnownManagedPaths(ArchiveSettings.DefaultPodcastDownloadDirectory),
-                ArchiveSettings.EnableRemoteMetadata,
-                cancellationToken).ConfigureAwait(false);
+                ArchiveSettings.EnableRemoteMetadata).ConfigureAwait(false);
         }
 
         if (ArchiveSettings.EnsureAudiobookLibrary)
@@ -66,8 +64,7 @@ public sealed class LibraryReconciler
                 ArchiveSettings.AudiobookDownloadDirectory,
                 CollectionTypeOptions.books,
                 KnownManagedPaths(ArchiveSettings.DefaultAudiobookDownloadDirectory),
-                ArchiveSettings.EnableRemoteMetadata,
-                cancellationToken).ConfigureAwait(false);
+                ArchiveSettings.EnableRemoteMetadata).ConfigureAwait(false);
         }
 
         if (ArchiveSettings.EnsureOtherLibrary)
@@ -77,8 +74,7 @@ public sealed class LibraryReconciler
                 ArchiveSettings.OtherDownloadDirectory,
                 CollectionTypeOptions.tvshows,
                 KnownManagedPaths(ArchiveSettings.DefaultOtherDownloadDirectory),
-                false,
-                cancellationToken).ConfigureAwait(false);
+                false).ConfigureAwait(false);
         }
     }
 
@@ -90,8 +86,7 @@ public sealed class LibraryReconciler
         string path,
         CollectionTypeOptions collectionType,
         IReadOnlySet<string> replaceablePaths,
-        bool enableInternetProviders,
-        CancellationToken cancellationToken)
+        bool enableInternetProviders)
     {
         var desiredPath = Path.GetFullPath(path);
         NormalizeLibraryOptions(libraryName, enableInternetProviders);
@@ -139,7 +134,6 @@ public sealed class LibraryReconciler
         {
             Enabled = true,
             EnableRealtimeMonitor = true,
-            EnableInternetProviders = enableInternetProviders,
             PreferNonstandardArtistsTag = true,
             PathInfos = new[] { new MediaPathInfo(path) },
             MetadataSavers = Array.Empty<string>(),
@@ -155,7 +149,7 @@ public sealed class LibraryReconciler
             TypeOptions = Array.Empty<TypeOptions>()
         };
 
-    private static IReadOnlySet<string> KnownManagedPaths(params string[] defaultPaths)
+    private static HashSet<string> KnownManagedPaths(params string[] defaultPaths)
         => defaultPaths
             .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Music", "YouTube Music"))
             .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "YouTube"))
@@ -211,18 +205,13 @@ public sealed class LibraryReconciler
             try
             {
                 var text = File.ReadAllText(optionsPath);
-                var cleaned = Regex.Replace(
-                    text,
-                    @"\s*<MediaPathInfo>(?:(?!</MediaPathInfo>).)*(?:This resource fork intentionally left blank|&#x0;)(?:(?!</MediaPathInfo>).)*</MediaPathInfo>",
-                    string.Empty,
-                    RegexOptions.Singleline | RegexOptions.CultureInvariant);
+                var cleaned = AppleDoubleMediaPathRegex().Replace(text, string.Empty);
                 var enabledValue = enableInternetProviders ? "true" : "false";
-                cleaned = Regex.IsMatch(cleaned, @"<EnableInternetProviders>.*?</EnableInternetProviders>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
-                    ? Regex.Replace(
+                cleaned = EnableInternetProvidersRegex().IsMatch(cleaned)
+                    ? EnableInternetProvidersRegex().Replace(
                         cleaned,
-                        @"<EnableInternetProviders>.*?</EnableInternetProviders>",
                         $"<EnableInternetProviders>{enabledValue}</EnableInternetProviders>",
-                        RegexOptions.Singleline | RegexOptions.CultureInvariant)
+                        1)
                     : cleaned.Replace(
                         "<EnableRealtimeMonitor>",
                         $"<EnableInternetProviders>{enabledValue}</EnableInternetProviders>{Environment.NewLine}  <EnableRealtimeMonitor>",
@@ -253,8 +242,19 @@ public sealed class LibraryReconciler
         {
             File.Delete(path);
         }
-        catch
+        catch (IOException)
         {
+            // AppleDouble cleanup is best-effort; Jellyfin can continue if a file is locked.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // AppleDouble cleanup is best-effort; permissions may block deleting some files.
         }
     }
+
+    [GeneratedRegex(@"\s*<MediaPathInfo>(?:(?!</MediaPathInfo>).)*(?:This resource fork intentionally left blank|&#x0;)(?:(?!</MediaPathInfo>).)*</MediaPathInfo>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex AppleDoubleMediaPathRegex();
+
+    [GeneratedRegex(@"<EnableInternetProviders>.*?</EnableInternetProviders>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex EnableInternetProvidersRegex();
 }
