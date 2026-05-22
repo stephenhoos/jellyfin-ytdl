@@ -96,7 +96,7 @@ public sealed partial class LibraryReconciler
 
         if (existing is null)
         {
-            var options = CreateLibraryOptions(desiredPath, enableInternetProviders);
+            var options = CreateLibraryOptions(desiredPath);
             await _libraryManager.AddVirtualFolder(libraryName, collectionType, options, false).ConfigureAwait(false);
             _logger.LogInformation("YtdlArchive created Jellyfin library {LibraryName} at {Path}", libraryName, desiredPath);
             return;
@@ -129,7 +129,7 @@ public sealed partial class LibraryReconciler
         }
     }
 
-    private static LibraryOptions CreateLibraryOptions(string path, bool enableInternetProviders)
+    private static LibraryOptions CreateLibraryOptions(string path)
         => new()
         {
             Enabled = true,
