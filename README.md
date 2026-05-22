@@ -122,3 +122,9 @@ with optional rough 10% or 20% chapter breaks.
 - Managed `yt-dlp` downloads are checked against the published SHA-256 sums.
 - Folder creation is restricted to the configured archive roots and their parent
   media folder.
+
+## Quality Status
+
+The project is scanned with SonarQube Cloud on pushes and pull requests. As of
+the latest `main` scan, the SonarQube workflow passes and all imported
+SonarQube issues have been resolved.
