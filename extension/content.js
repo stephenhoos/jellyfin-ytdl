@@ -21,15 +21,44 @@ function storageGet(defaults) {
   });
 }
 
-async function apiFetch(path, options) {
-  const settings = await storageGet({ apiToken: '' });
-  const headers = new Headers(options?.headers);
-  if (settings.apiToken) {
-    headers.set('X-YtdlArchive-Token', settings.apiToken);
+function storageSet(values) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(values, resolve);
+  });
+}
+
+async function fetchBrowserApiToken() {
+  const response = await fetch(`${SERVER}/browser-token`);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.apiToken) {
+    throw new Error(response.status === 401 ? 'Token required' : (payload?.error || response.statusText || 'Could not pair browser API token'));
   }
 
+  await storageSet({ apiToken: payload.apiToken });
+  return payload.apiToken;
+}
+
+async function browserApiToken() {
+  const settings = await storageGet({ apiToken: '' });
+  if (settings.apiToken) {
+    return settings.apiToken;
+  }
+
+  return fetchBrowserApiToken();
+}
+
+async function apiFetch(path, options) {
+  const apiToken = await browserApiToken();
+  const headers = new Headers(options?.headers);
+  headers.set('X-YtdlArchive-Token', apiToken);
+
   const fetchOptions = options ? { ...options, headers } : { headers };
-  const response = await fetch(`${SERVER}${path}`, fetchOptions);
+  let response = await fetch(`${SERVER}${path}`, fetchOptions);
+  if (response.status === 401) {
+    headers.set('X-YtdlArchive-Token', await fetchBrowserApiToken());
+    response = await fetch(`${SERVER}${path}`, fetchOptions);
+  }
+
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const tokenHint = response.status === 401 ? ' Open the extension popup and set the Browser API token from Jellyfin.' : '';

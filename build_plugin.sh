@@ -10,7 +10,7 @@ ZIP_PATH="$PACKAGE_DIR/YtdlArchive-0.0.0.1.zip"
 
 cd "$ROOT_DIR"
 
-find "$ROOT_DIR" -name '._*' -delete
+find "$ROOT_DIR" -name '._*' ! -path "$ROOT_DIR/.git/*" -delete
 rm -rf "$DIST_DIR" "$PACKAGE_DIR"
 mkdir -p "$DIST_DIR" "$PACKAGE_DIR"
 

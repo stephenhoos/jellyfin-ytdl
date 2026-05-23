@@ -13,6 +13,7 @@ namespace Jellyfin.Plugin.YtdlArchive.Services;
 public sealed class DownloaderHostedService : BackgroundService
 {
     private const int Port = 9876;
+    private static readonly TimeSpan ListenerRestartDelay = TimeSpan.FromSeconds(5);
     private const string Format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best";
     private const string AudioQuality = "audio";
     private const string M4aFormat = "m4a";
@@ -106,6 +107,34 @@ public sealed class DownloaderHostedService : BackgroundService
             _logger.LogInformation("YtdlArchive using yt-dlp {Version} at {Path}", _ytdlpVersion ?? "unknown version", _ytdlpPath);
         }
 
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RunListenerAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex) when (ex is HttpListenerException or InvalidOperationException or ObjectDisposedException)
+            {
+                _logger.LogWarning(ex, "YtdlArchive downloader server stopped unexpectedly and will restart");
+            }
+            finally
+            {
+                CloseListener();
+            }
+
+            if (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(ListenerRestartDelay, stoppingToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task RunListenerAsync(CancellationToken stoppingToken)
+    {
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://localhost:{Port}/");
         _listener.Start();
@@ -126,14 +155,6 @@ public sealed class DownloaderHostedService : BackgroundService
             {
                 break;
             }
-            catch (HttpListenerException)
-            {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
 
             _ = Task.Run(() => HandleAsync(context, stoppingToken), CancellationToken.None);
         }
@@ -143,8 +164,7 @@ public sealed class DownloaderHostedService : BackgroundService
     {
         try
         {
-            _listener?.Stop();
-            _listener?.Close();
+            CloseListener();
         }
         catch (ObjectDisposedException ex)
         {
@@ -152,6 +172,13 @@ public sealed class DownloaderHostedService : BackgroundService
         }
 
         return base.StopAsync(cancellationToken);
+    }
+
+    private void CloseListener()
+    {
+        var listener = Interlocked.Exchange(ref _listener, null);
+        listener?.Stop();
+        listener?.Close();
     }
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -164,6 +191,14 @@ public sealed class DownloaderHostedService : BackgroundService
             return;
         }
 
+        var method = context.Request.HttpMethod;
+        var path = context.Request.Url?.AbsolutePath;
+        if (IsRoute(method, path, "GET", "/browser-token"))
+        {
+            await SendBrowserTokenAsync(context, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!IsAuthorized(context.Request))
         {
             await SendJsonAsync(context.Response, 401, new { error = "Missing or invalid YtdlArchive browser API token" }, cancellationToken).ConfigureAwait(false);
@@ -172,8 +207,6 @@ public sealed class DownloaderHostedService : BackgroundService
 
         try
         {
-            var method = context.Request.HttpMethod;
-            var path = context.Request.Url?.AbsolutePath;
             if (IsRoute(method, path, "GET", "/ping"))
             {
                 await SendJsonAsync(context.Response, 200, new
@@ -712,6 +745,25 @@ public sealed class DownloaderHostedService : BackgroundService
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
+    private static async Task SendBrowserTokenAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        if (!IsBrowserExtensionOrigin(context.Request.Headers["Origin"]))
+        {
+            await SendJsonAsync(context.Response, 403, new { error = "Browser token pairing is only available to browser extensions" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        EnsureBrowserApiToken();
+        var token = Plugin.Instance?.Configuration.BrowserApiToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            await SendJsonAsync(context.Response, 503, new { error = "Browser API token is not available" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await SendJsonAsync(context.Response, 200, new { apiToken = token }, cancellationToken).ConfigureAwait(false);
+    }
+
     private static bool IsAuthorized(HttpListenerRequest request)
     {
         var expected = Plugin.Instance?.Configuration.BrowserApiToken;
@@ -828,6 +880,16 @@ public sealed class DownloaderHostedService : BackgroundService
             || (uri.Scheme == Uri.UriSchemeHttp && (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
             || ((uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
                 && AllowedDownloadHosts.Contains(uri.Host));
+    }
+
+    private static bool IsBrowserExtensionOrigin(string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return uri.Scheme is "chrome-extension" or "moz-extension";
     }
 
     private static async Task SendJsonAsync(HttpListenerResponse response, int statusCode, object value, CancellationToken cancellationToken)
