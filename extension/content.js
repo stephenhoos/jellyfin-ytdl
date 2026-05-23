@@ -151,9 +151,11 @@ function targetIcon(target) {
 }
 
 function displayLabel(saveType) {
-  const target = targetGroupLabel(saveType.target || 'other');
   return saveType.label
-    .replace(new RegExp(`\\s+to\\s+${target}s?$`, 'i'), '')
+    .replace(/\s+to\s+Music$/i, '')
+    .replace(/\s+to\s+Podcast$/i, '')
+    .replace(/\s+to\s+Audiobooks?$/i, '')
+    .replace(/\s+to\s+Video$/i, '')
     .replace(/\s+to\s+Other$/i, '')
     .replace(/^M4B\s+Audiobook\s*/i, 'M4B ')
     .replace(/\s+/g, ' ')
