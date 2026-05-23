@@ -7,6 +7,8 @@ SOLUTION="$ROOT_DIR/JellyfinYtdl.sln"
 DIST_DIR="$ROOT_DIR/dist/YtdlArchive"
 PACKAGE_DIR="$ROOT_DIR/dist/package"
 ZIP_PATH="$PACKAGE_DIR/YtdlArchive-0.0.0.1.zip"
+EXTENSION_DIST_DIR="$DIST_DIR/chrome-extension"
+EXTENSION_ZIP_PATH="$PACKAGE_DIR/YtdlArchive-ChromeExtension-0.0.0.1.zip"
 
 cd "$ROOT_DIR"
 
@@ -19,6 +21,9 @@ dotnet test "$SOLUTION" -c Release
 dotnet publish "$PROJECT" -c Release -o "$DIST_DIR"
 find "$DIST_DIR" -name '._*' -delete
 cp "$ROOT_DIR/packaging/YtdlArchive/meta.json" "$DIST_DIR/meta.json"
+mkdir -p "$EXTENSION_DIST_DIR"
+cp "$ROOT_DIR"/extension/* "$EXTENSION_DIST_DIR"/
+find "$EXTENSION_DIST_DIR" -name '._*' -delete
 find "$DIST_DIR" -name '._*' -delete
 
 for forbidden in \
@@ -38,6 +43,12 @@ done
 rm -f "$DIST_DIR"/*.pdb
 
 (
+  cd "$EXTENSION_DIST_DIR"
+  find . -name '._*' -delete
+  zip -q -r "$EXTENSION_ZIP_PATH" .
+)
+
+(
   cd "$DIST_DIR"
   find . -name '._*' -delete
   zip -q -r "$ZIP_PATH" .
@@ -45,3 +56,4 @@ rm -f "$DIST_DIR"/*.pdb
 
 echo "Plugin folder: $DIST_DIR"
 echo "Plugin zip:    $ZIP_PATH"
+echo "Chrome zip:    $EXTENSION_ZIP_PATH"

@@ -27,7 +27,42 @@ function storageSet(values) {
   });
 }
 
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    if (!chrome.runtime?.sendMessage) {
+      reject(new Error('Chrome runtime messaging is not available'));
+      return;
+    }
+
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+async function requestBrowserApiToken(forceRefresh = false) {
+  const response = await sendRuntimeMessage({
+    type: 'ytdlArchive.getBrowserApiToken',
+    forceRefresh
+  });
+  if (response?.apiToken) {
+    await storageSet({ apiToken: response.apiToken });
+    return response.apiToken;
+  }
+
+  throw new Error(response?.error || 'Could not pair browser API token');
+}
+
 async function fetchBrowserApiToken() {
+  if (chrome.runtime?.sendMessage) {
+    return requestBrowserApiToken(true);
+  }
+
   const response = await fetch(`${SERVER}/browser-token`);
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.apiToken) {
@@ -55,7 +90,7 @@ async function apiFetch(path, options) {
   const fetchOptions = options ? { ...options, headers } : { headers };
   let response = await fetch(`${SERVER}${path}`, fetchOptions);
   if (response.status === 401) {
-    headers.set('X-YtdlArchive-Token', await fetchBrowserApiToken());
+    headers.set('X-YtdlArchive-Token', await requestBrowserApiToken(true));
     response = await fetch(`${SERVER}${path}`, fetchOptions);
   }
 

@@ -120,7 +120,9 @@ class FakeDocument {
 
 function installChromeStorage(apiToken = 'token') {
   const store = { apiToken };
+  const existingRuntime = globalThis.chrome?.runtime;
   globalThis.chrome = {
+    runtime: existingRuntime,
     storage: {
       local: {
         get(defaults, callback) {
@@ -134,6 +136,12 @@ function installChromeStorage(apiToken = 'token') {
     }
   };
   return store;
+}
+
+function sendExtensionMessage(listener, message) {
+  return new Promise((resolve) => {
+    listener(message, {}, resolve);
+  });
 }
 
 function importFresh(path) {
@@ -290,4 +298,53 @@ test('popup script explains missing token responses', async () => {
 
   assert.equal(document.getElementById('status-title').textContent, 'Token required');
   assert.match(document.getElementById('status-sub').textContent, /Browser API token/);
+});
+
+test('background script returns cached and refreshed browser tokens', async () => {
+  let listener;
+  const store = { apiToken: 'cached-token' };
+  globalThis.chrome = {
+    runtime: {
+      onMessage: {
+        addListener(callback) {
+          listener = callback;
+        }
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+
+  let tokenFetches = 0;
+  globalThis.fetch = async (url) => {
+    assert.equal(url, 'http://localhost:9876/browser-token');
+    tokenFetches += 1;
+    return {
+      ok: true,
+      json: async () => ({ apiToken: 'fresh-token' })
+    };
+  };
+
+  await importFresh('./extension/background.js');
+
+  assert.equal(listener({ type: 'ignored' }, {}, () => {}), false);
+  assert.deepEqual(
+    await sendExtensionMessage(listener, { type: 'ytdlArchive.getBrowserApiToken' }),
+    { apiToken: 'cached-token' });
+  assert.equal(tokenFetches, 0);
+
+  assert.deepEqual(
+    await sendExtensionMessage(listener, { type: 'ytdlArchive.getBrowserApiToken', forceRefresh: true }),
+    { apiToken: 'fresh-token' });
+  assert.equal(store.apiToken, 'fresh-token');
+  assert.equal(tokenFetches, 1);
 });
