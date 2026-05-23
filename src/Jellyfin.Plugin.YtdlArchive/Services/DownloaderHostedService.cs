@@ -747,7 +747,7 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static async Task SendBrowserTokenAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
-        if (!IsBrowserExtensionOrigin(context.Request.Headers["Origin"]))
+        if (!IsBrowserTokenPairingOrigin(context.Request.Headers["Origin"]))
         {
             await SendJsonAsync(context.Response, 403, new { error = "Browser token pairing is only available to browser extensions" }, cancellationToken).ConfigureAwait(false);
             return;
@@ -882,9 +882,14 @@ public sealed class DownloaderHostedService : BackgroundService
                 && AllowedDownloadHosts.Contains(uri.Host));
     }
 
-    private static bool IsBrowserExtensionOrigin(string? origin)
+    private static bool IsBrowserTokenPairingOrigin(string? origin)
     {
-        if (string.IsNullOrWhiteSpace(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        if (string.IsNullOrWhiteSpace(origin))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
         {
             return false;
         }
