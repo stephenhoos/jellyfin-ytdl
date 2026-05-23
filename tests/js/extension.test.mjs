@@ -234,7 +234,7 @@ test('content script queues downloads and reports completed status', async () =>
   await importFresh('./extension/content.js');
   await flushAsync();
   const picker = document.getElementById('ytdl-picker');
-  const item = picker.children[0];
+  const item = picker.children[0].children[1];
   item.listeners.get('click')({ stopPropagation() {} });
   await flushAsync();
 

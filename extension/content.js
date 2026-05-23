@@ -124,6 +124,62 @@ function loadSaveTypes() {
   return saveTypesLoadPromise;
 }
 
+function targetGroupLabel(target) {
+  switch (target) {
+    case 'music':
+      return 'Music';
+    case 'podcast':
+      return 'Podcast';
+    case 'audiobook':
+      return 'Audiobook';
+    default:
+      return 'Video';
+  }
+}
+
+function targetIcon(target) {
+  switch (target) {
+    case 'music':
+      return '♪';
+    case 'podcast':
+      return '◌';
+    case 'audiobook':
+      return '▣';
+    default:
+      return '▾';
+  }
+}
+
+function displayLabel(saveType) {
+  const target = targetGroupLabel(saveType.target || 'other');
+  return saveType.label
+    .replace(new RegExp(`\\s+to\\s+${target}s?$`, 'i'), '')
+    .replace(/\s+to\s+Other$/i, '')
+    .replace(/^M4B\s+Audiobook\s*/i, 'M4B ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function displayIcon(saveType) {
+  return saveType.target === 'podcast'
+    ? targetIcon(saveType.target)
+    : saveType.icon || targetIcon(saveType.target || 'other');
+}
+
+function groupedSaveTypes() {
+  const groups = new Map();
+  saveTypes.forEach((saveType) => {
+    const target = saveType.target || 'other';
+    if (!groups.has(target)) {
+      groups.set(target, []);
+    }
+
+    groups.get(target).push(saveType);
+  });
+
+  return groups;
+}
+
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 
 function showToast(msg) {
@@ -161,16 +217,39 @@ function injectButton() {
   // Build quality picker
   const picker = document.createElement('div');
   picker.id = 'ytdl-picker';
-  saveTypes.forEach(q => {
-    const item = document.createElement('div');
-    item.className = 'ytdl-pick-item';
-    item.innerHTML = `<span class="ytdl-pick-icon">${q.icon}</span>${q.label}`;
-    item.addEventListener('click', (e) => {
-      e.stopPropagation();
-      picker.classList.remove('open');
-      startDownload(q.quality || q.value, q.audioFormat, q.target || 'other', q.chapterPercent);
+  groupedSaveTypes().forEach((items, target) => {
+    const section = document.createElement('div');
+    section.className = 'ytdl-pick-section';
+
+    const header = document.createElement('div');
+    header.className = 'ytdl-pick-header';
+    header.textContent = targetGroupLabel(target);
+    section.appendChild(header);
+
+    items.forEach(q => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'ytdl-pick-item';
+
+      const icon = document.createElement('span');
+      icon.className = 'ytdl-pick-icon';
+      icon.textContent = displayIcon(q);
+      item.appendChild(icon);
+
+      const label = document.createElement('span');
+      label.className = 'ytdl-pick-label';
+      label.textContent = displayLabel(q);
+      item.appendChild(label);
+
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        picker.classList.remove('open');
+        startDownload(q.quality || q.value, q.audioFormat, q.target || 'other', q.chapterPercent);
+      });
+      section.appendChild(item);
     });
-    picker.appendChild(item);
+
+    picker.appendChild(section);
   });
 
   // Click: show picker; click elsewhere: close
