@@ -154,6 +154,14 @@ async function flushAsync(turns = 12) {
   }
 }
 
+function pickerItems(picker) {
+  return picker.children.flatMap(section => section.children.slice(1));
+}
+
+function pickerLabels(picker) {
+  return pickerItems(picker).map(item => item.children[1].textContent);
+}
+
 test('content script injects the download button on watch pages', async () => {
   const document = new FakeDocument();
   globalThis.document = document;
@@ -239,6 +247,97 @@ test('content script queues downloads and reports completed status', async () =>
   await flushAsync();
 
   assert.match(document.getElementById('ytdl-toast').textContent, /Saved video|Downloading/);
+});
+
+test('content script renders every save type as a reachable menu option', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setInterval = () => 1;
+  globalThis.clearInterval = () => {};
+  globalThis.setTimeout = () => {};
+  installChromeStorage();
+
+  const saveTypes = [
+    { label: 'Best to Other', quality: 'best', icon: '*', target: 'other' },
+    { label: '1080p to Other', quality: '1080', icon: 'HD', target: 'other' },
+    { label: '720p to Other', quality: '720', icon: 'HD', target: 'other' },
+    { label: '480p to Other', quality: '480', icon: 'SD', target: 'other' },
+    { label: 'MP3 to Music', quality: 'audio', icon: '*', audioFormat: 'mp3', target: 'music' },
+    { label: 'M4A to Music', quality: 'audio', icon: '*', audioFormat: 'm4a', target: 'music' },
+    { label: 'Opus to Music', quality: 'audio', icon: '*', audioFormat: 'opus', target: 'music' },
+    { label: 'MP3 to Podcast', quality: 'audio', icon: '*', audioFormat: 'mp3', target: 'podcast' },
+    { label: 'M4A to Podcast', quality: 'audio', icon: '*', audioFormat: 'm4a', target: 'podcast' },
+    { label: 'M4B Audiobook', quality: 'audio', icon: '*', audioFormat: 'm4b', target: 'audiobook' },
+    { label: 'M4B Audiobook 10% chapters', quality: 'audio', icon: '*', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 10 },
+    { label: 'M4B Audiobook 20% chapters', quality: 'audio', icon: '*', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 20 },
+    { label: 'M4A to Audiobooks', quality: 'audio', icon: '*', audioFormat: 'm4a', target: 'audiobook' }
+  ];
+  const downloads = [];
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({ saveTypes })
+      };
+    }
+
+    if (url.endsWith('/download')) {
+      downloads.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        json: async () => ({ queued: true, saveTo: '/media' })
+      };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({})
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+
+  const picker = document.getElementById('ytdl-picker');
+  assert.equal(picker.children.length, 4);
+  assert.deepEqual(picker.children.map(section => section.children[0].textContent), [
+    'Video',
+    'Music',
+    'Podcast',
+    'Audiobook'
+  ]);
+  assert.equal(pickerItems(picker).length, saveTypes.length);
+  assert.deepEqual(pickerLabels(picker), [
+    'Best',
+    '1080p',
+    '720p',
+    '480p',
+    'MP3',
+    'M4A',
+    'Opus',
+    'MP3',
+    'M4A',
+    'M4B',
+    'M4B 10% chapters',
+    'M4B 20% chapters',
+    'M4A'
+  ]);
+
+  for (const item of pickerItems(picker)) {
+    item.listeners.get('click')({ stopPropagation() {} });
+  }
+  await flushAsync();
+
+  assert.equal(downloads.length, saveTypes.length);
+  assert.equal(downloads.at(-1).target, 'audiobook');
+  assert.equal(downloads.at(-1).audioFormat, 'm4a');
 });
 
 test('popup script reports a healthy server and saves tokens', async () => {

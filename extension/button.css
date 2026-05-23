@@ -5,6 +5,7 @@
   align-items: center;
   margin: 0 4px;
   vertical-align: middle;
+  position: relative;
 }
 
 #ytdl-btn {
@@ -62,12 +63,27 @@
   width: min(300px, calc(100vw - 24px));
   max-height: min(520px, calc(100vh - 120px));
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   box-shadow: 0 12px 32px rgba(0,0,0,.7);
   z-index: 9999;
   padding: 7px;
   color: #f1f1f1;
   font-family: 'YouTube Sans', 'Roboto', Arial, sans-serif;
   box-sizing: border-box;
+}
+
+#ytdl-picker::-webkit-scrollbar {
+  width: 8px;
+}
+
+#ytdl-picker::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.26);
+  border-radius: 999px;
+}
+
+#ytdl-picker::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 #ytdl-picker.open { display: block; }
