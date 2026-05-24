@@ -111,10 +111,10 @@ public sealed class YtdlpManager
                 await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
                 return process.ExitCode == 0 ? output.Trim() : null;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 KillProcess(process);
-                _logger.LogWarning("Timed out reading yt-dlp version after {TimeoutSeconds} seconds", VersionCheckTimeout.TotalSeconds);
+                _logger.LogWarning(ex, "Timed out reading yt-dlp version after {TimeoutSeconds} seconds", VersionCheckTimeout.TotalSeconds);
                 return null;
             }
         }

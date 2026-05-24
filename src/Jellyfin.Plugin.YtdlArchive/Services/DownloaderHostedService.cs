@@ -744,7 +744,7 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static IEnumerable<string> ListenerPrefixes()
     {
-        yield return $"http://localhost:{Port}/";
+        yield return BuildHttpServerUrl("localhost") + "/";
 
         if (Plugin.Instance?.Configuration.EnableLanBrowserAccess != true)
         {
@@ -753,30 +753,16 @@ public sealed class DownloaderHostedService : BackgroundService
 
         foreach (var address in LanAddresses())
         {
-            yield return $"http://{address}:{Port}/";
+            yield return BuildHttpServerUrl(address.ToString()) + "/";
         }
     }
 
     private static IEnumerable<IPAddress> LanAddresses()
-    {
-        foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (networkInterface.OperationalStatus != OperationalStatus.Up)
-            {
-                continue;
-            }
-
-            var properties = networkInterface.GetIPProperties();
-            foreach (var address in properties.UnicastAddresses)
-            {
-                if (address.Address.AddressFamily == AddressFamily.InterNetwork
-                    && !IPAddress.IsLoopback(address.Address))
-                {
-                    yield return address.Address;
-                }
-            }
-        }
-    }
+        => NetworkInterface.GetAllNetworkInterfaces()
+            .Where(networkInterface => networkInterface.OperationalStatus == OperationalStatus.Up)
+            .SelectMany(networkInterface => networkInterface.GetIPProperties().UnicastAddresses)
+            .Select(address => address.Address)
+            .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address));
 
     private static string EffectiveAdvertisedServerUrl()
     {
@@ -792,11 +778,17 @@ public sealed class DownloaderHostedService : BackgroundService
             var address = LanAddresses().FirstOrDefault();
             if (address is not null)
             {
-                return $"http://{address}:{Port}";
+                return BuildHttpServerUrl(address.ToString());
             }
         }
 
-        return $"http://localhost:{Port}";
+        return BuildHttpServerUrl("localhost");
+    }
+
+    private static string BuildHttpServerUrl(string host)
+    {
+        var uri = new UriBuilder(Uri.UriSchemeHttp, host, Port).Uri;
+        return TrimTrailingSlash(uri.AbsoluteUri);
     }
 
     private static bool IsValidHttpServerUrl(string? value)
