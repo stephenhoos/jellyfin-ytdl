@@ -44,6 +44,10 @@ public sealed class PluginConfiguration : BasePluginConfiguration
 
     public string BrowserApiToken { get; set; } = string.Empty;
 
+    public bool EnableLanBrowserAccess { get; set; }
+
+    public string AdvertisedServerUrl { get; set; } = string.Empty;
+
     public bool AllowNonYouTubeDownloads { get; set; }
 
     public int MaxConcurrentDownloads { get; set; } = 2;

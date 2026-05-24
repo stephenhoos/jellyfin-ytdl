@@ -15,6 +15,7 @@ public sealed class YtdlpManager
     private const string HttpsScheme = "https";
     private const string GitHubHost = "github.com";
     private const string YtdlpReleaseDownloadPath = "yt-dlp/yt-dlp/releases/latest/download";
+    private static readonly TimeSpan VersionCheckTimeout = TimeSpan.FromSeconds(10);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IServerApplicationPaths _applicationPaths;
@@ -102,9 +103,20 @@ public sealed class YtdlpManager
                 return null;
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return process.ExitCode == 0 ? output.Trim() : null;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(VersionCheckTimeout);
+                var output = await process.StandardOutput.ReadToEndAsync(timeout.Token).ConfigureAwait(false);
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                return process.ExitCode == 0 ? output.Trim() : null;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                KillProcess(process);
+                _logger.LogWarning("Timed out reading yt-dlp version after {TimeoutSeconds} seconds", VersionCheckTimeout.TotalSeconds);
+                return null;
+            }
         }
         catch (Exception ex)
         {
@@ -230,6 +242,21 @@ public sealed class YtdlpManager
 
     private static string? FirstExisting(params string[] paths)
         => paths.FirstOrDefault(File.Exists);
+
+    private static void KillProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // The process may have exited between HasExited and Kill.
+        }
+    }
 
     private static void TryDelete(string path)
     {

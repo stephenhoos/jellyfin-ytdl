@@ -447,3 +447,50 @@ test('background script returns cached and refreshed browser tokens', async () =
   assert.equal(store.apiToken, 'fresh-token');
   assert.equal(tokenFetches, 1);
 });
+
+test('background script loads bundled LAN connection config', async () => {
+  let listener;
+  const store = {};
+  globalThis.chrome = {
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://test/${path}`;
+      },
+      onMessage: {
+        addListener(callback) {
+          listener = callback;
+        }
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+
+  globalThis.fetch = async (url) => {
+    assert.equal(url, 'chrome-extension://test/config.json');
+    return {
+      ok: true,
+      json: async () => ({
+        serverUrl: 'http://192.168.1.25:9876/',
+        apiToken: 'lan-token'
+      })
+    };
+  };
+
+  await importFresh('./extension/background.js');
+
+  assert.deepEqual(
+    await sendExtensionMessage(listener, { type: 'ytdlArchive.getConnectionSettings' }),
+    { apiToken: 'lan-token', serverUrl: 'http://192.168.1.25:9876' });
+  assert.equal(store.serverUrl, 'http://192.168.1.25:9876');
+  assert.equal(store.apiToken, 'lan-token');
+});

@@ -1,6 +1,6 @@
 'use strict';
 
-const SERVER = 'http://localhost:9876';
+const DEFAULT_SERVER = 'http://localhost:9876';
 
 const dot        = document.getElementById('dot');
 const statusTitle = document.getElementById('status-title');
@@ -54,12 +54,25 @@ async function requestBrowserApiToken(forceRefresh = false) {
   throw new Error(response?.error || 'Could not pair browser API token');
 }
 
+async function serverUrl() {
+  if (chrome.runtime?.sendMessage) {
+    const response = await sendRuntimeMessage({ type: 'ytdlArchive.getConnectionSettings' }).catch(() => null);
+    if (response?.serverUrl) {
+      return response.serverUrl;
+    }
+  }
+
+  const settings = await storageGet({ serverUrl: DEFAULT_SERVER });
+  const configured = String(settings.serverUrl || DEFAULT_SERVER).trim();
+  return configured.endsWith('/') ? configured.slice(0, -1) : configured;
+}
+
 async function fetchBrowserApiToken() {
   if (chrome.runtime?.sendMessage) {
     return requestBrowserApiToken(true);
   }
 
-  const response = await fetch(`${SERVER}/browser-token`, { signal: AbortSignal.timeout(2500) });
+  const response = await fetch(`${await serverUrl()}/browser-token`, { signal: AbortSignal.timeout(2500) });
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.apiToken) {
     throw new Error(response.status === 401 ? 'Token required' : (payload?.error || response.statusText || 'Could not pair browser API token'));
@@ -94,10 +107,11 @@ async function checkServer() {
 
   try {
     const headers = await authHeaders();
-    let response = await fetch(`${SERVER}/ping`, { signal: AbortSignal.timeout(2500), headers });
+    const baseUrl = await serverUrl();
+    let response = await fetch(`${baseUrl}/ping`, { signal: AbortSignal.timeout(2500), headers });
     if (response.status === 401) {
       headers.set('X-YtdlArchive-Token', await requestBrowserApiToken(true));
-      response = await fetch(`${SERVER}/ping`, { signal: AbortSignal.timeout(2500), headers });
+      response = await fetch(`${baseUrl}/ping`, { signal: AbortSignal.timeout(2500), headers });
     }
 
     const data = await response.json().catch(() => null);
@@ -115,7 +129,7 @@ async function checkServer() {
           data.jellyfin.otherLibraryName
         ].filter(Boolean).join(' + ')}`
       : 'Jellyfin: not configured';
-    statusSub.textContent = `yt-dlp: ${data.ytdlp || 'found'} · ${jellyfin}`;
+    statusSub.textContent = `${baseUrl} · yt-dlp: ${data.ytdlp || 'found'} · ${jellyfin}`;
   } catch (err) {
     const tokenRequired = err?.message === 'Token required';
     dot.className = 'dot red';

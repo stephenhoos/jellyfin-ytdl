@@ -113,7 +113,21 @@
                         <button is="emby-button" type="button" class="raised" id="btnRegenerateBrowserApiToken">
                             <span>Regenerate</span>
                         </button>
-                        <div class="fieldDescription">Paste this token into the Chrome extension popup. The extension fetches its save types from this plugin.</div>
+                        <div class="fieldDescription">The Chrome extension uses this token when it talks to the plugin downloader API.</div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" id="chkEnableLanBrowserAccess" name="chkEnableLanBrowserAccess" type="checkbox" />
+                        <span>Allow Chrome extensions on my LAN to use this downloader</span>
+                    </label>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="txtAdvertisedServerUrl">Chrome extension server URL</label>
+                        <input is="emby-input" id="txtAdvertisedServerUrl" name="txtAdvertisedServerUrl" type="url" placeholder="http://192.168.1.50:9876" />
+                        <button is="emby-button" type="button" class="raised" id="btnWriteChromeExtensionConfig">
+                            <span>Update Chrome extension config</span>
+                        </button>
+                        <div class="fieldDescription">Use the Jellyfin server LAN address for other computers. After changing LAN access, restart Jellyfin so the downloader listens on the LAN address.</div>
                     </div>
 
                     <label class="checkboxContainer">
@@ -517,6 +531,8 @@
                         configPage.querySelector('#chkAutoInstallYtdlp').checked = config.AutoInstallYtdlp !== false;
                         configPage.querySelector('#chkAutoUpdateYtdlp').checked = config.AutoUpdateYtdlp !== false;
                         configPage.querySelector('#txtBrowserApiToken').value = config.BrowserApiToken || generateBrowserApiToken();
+                        configPage.querySelector('#chkEnableLanBrowserAccess').checked = config.EnableLanBrowserAccess === true;
+                        configPage.querySelector('#txtAdvertisedServerUrl').value = config.AdvertisedServerUrl || '';
                         configPage.querySelector('#chkAllowNonYouTubeDownloads').checked = config.AllowNonYouTubeDownloads === true;
                         configPage.querySelector('#txtMaxConcurrentDownloads').value = config.MaxConcurrentDownloads || 2;
                         configPage.querySelector('#txtYtdlpPath').value = config.YtdlpPath || '';
@@ -555,6 +571,8 @@
                         config.AutoInstallYtdlp = configPage.querySelector('#chkAutoInstallYtdlp').checked;
                         config.AutoUpdateYtdlp = configPage.querySelector('#chkAutoUpdateYtdlp').checked;
                         config.BrowserApiToken = configPage.querySelector('#txtBrowserApiToken').value || generateBrowserApiToken();
+                        config.EnableLanBrowserAccess = configPage.querySelector('#chkEnableLanBrowserAccess').checked;
+                        config.AdvertisedServerUrl = configPage.querySelector('#txtAdvertisedServerUrl').value || '';
                         config.AllowNonYouTubeDownloads = configPage.querySelector('#chkAllowNonYouTubeDownloads').checked;
                         config.MaxConcurrentDownloads = Math.max(1, Math.min(6, Number.parseInt(configPage.querySelector('#txtMaxConcurrentDownloads').value || '2', 10)));
                         config.YtdlpPath = configPage.querySelector('#txtYtdlpPath').value || '';
@@ -627,11 +645,32 @@
                     }
                 }
 
+                function writeChromeExtensionConfig(event) {
+                    const button = event.target.closest?.('#btnWriteChromeExtensionConfig');
+                    if (!button) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const configPage = findPage(button);
+                    Dashboard.showLoadingMsg();
+                    saveConfig(configPage).then(function () {
+                        return downloaderPost('/extension/config', {}, configPage);
+                    }).then(function (result) {
+                        const extensionDirectory = result && result.extensionDirectory ? ` Folder: ${result.extensionDirectory}` : '';
+                        const serverUrl = result && result.serverUrl ? result.serverUrl : 'the configured server URL';
+                        setStatus(configPage, `Chrome extension config updated for ${serverUrl}.${extensionDirectory}`);
+                    }).catch(function (err) {
+                        setStatus(configPage, (err && (err.message || err.Message)) || 'Could not update Chrome extension config.');
+                    }).finally(Dashboard.hideLoadingMsg);
+                }
+
                 if (!globalThis.ytdlArchiveConfigDelegatesBound) {
                     globalThis.ytdlArchiveConfigDelegatesBound = true;
                     document.addEventListener('submit', submitForm);
                     document.addEventListener('click', browseDirectory);
                     document.addEventListener('click', regenerateBrowserApiToken);
+                    document.addEventListener('click', writeChromeExtensionConfig);
                     document.addEventListener('viewshow', function (event) {
                         const configPage = findPage(event.target);
                         if (configPage) {

@@ -1,6 +1,6 @@
 'use strict';
 
-const SERVER = 'http://localhost:9876';
+const DEFAULT_SERVER = 'http://localhost:9876';
 let injected = false;
 let saveTypes = [
   { label: 'Best to Other', quality: 'best', icon: '★', target: 'other' },
@@ -58,12 +58,25 @@ async function requestBrowserApiToken(forceRefresh = false) {
   throw new Error(response?.error || 'Could not pair browser API token');
 }
 
+async function serverUrl() {
+  if (chrome.runtime?.sendMessage) {
+    const response = await sendRuntimeMessage({ type: 'ytdlArchive.getConnectionSettings' }).catch(() => null);
+    if (response?.serverUrl) {
+      return response.serverUrl;
+    }
+  }
+
+  const settings = await storageGet({ serverUrl: DEFAULT_SERVER });
+  const configured = String(settings.serverUrl || DEFAULT_SERVER).trim();
+  return configured.endsWith('/') ? configured.slice(0, -1) : configured;
+}
+
 async function fetchBrowserApiToken() {
   if (chrome.runtime?.sendMessage) {
     return requestBrowserApiToken(true);
   }
 
-  const response = await fetch(`${SERVER}/browser-token`);
+  const response = await fetch(`${await serverUrl()}/browser-token`);
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.apiToken) {
     throw new Error(response.status === 401 ? 'Token required' : (payload?.error || response.statusText || 'Could not pair browser API token'));
@@ -88,10 +101,11 @@ async function apiFetch(path, options) {
   headers.set('X-YtdlArchive-Token', apiToken);
 
   const fetchOptions = options ? { ...options, headers } : { headers };
-  let response = await fetch(`${SERVER}${path}`, fetchOptions);
+  const baseUrl = await serverUrl();
+  let response = await fetch(`${baseUrl}${path}`, fetchOptions);
   if (response.status === 401) {
     headers.set('X-YtdlArchive-Token', await requestBrowserApiToken(true));
-    response = await fetch(`${SERVER}${path}`, fetchOptions);
+    response = await fetch(`${baseUrl}${path}`, fetchOptions);
   }
 
   const payload = await response.json().catch(() => null);

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -94,6 +96,7 @@ public sealed class DownloaderHostedService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         EnsureBrowserApiToken();
+        await TryWriteBrowserExtensionConfigFileAsync(stoppingToken).ConfigureAwait(false);
         Directory.CreateDirectory(DownloadDirectory);
         Directory.CreateDirectory(MusicDownloadDirectory);
         _ytdlpPath = await _ytdlpManager.EnsureAsync(stoppingToken).ConfigureAwait(false);
@@ -136,9 +139,14 @@ public sealed class DownloaderHostedService : BackgroundService
     private async Task RunListenerAsync(CancellationToken stoppingToken)
     {
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://localhost:{Port}/");
+        var prefixes = ListenerPrefixes().ToArray();
+        foreach (var prefix in prefixes)
+        {
+            _listener.Prefixes.Add(prefix);
+        }
+
         _listener.Start();
-        _logger.LogInformation("YtdlArchive downloader server listening on http://localhost:{Port}", Port);
+        _logger.LogInformation("YtdlArchive downloader server listening on {Prefixes}", string.Join(", ", prefixes));
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -213,6 +221,8 @@ public sealed class DownloaderHostedService : BackgroundService
                 {
                     ok = true,
                     embedded = true,
+                    serverUrl = EffectiveAdvertisedServerUrl(),
+                    lanBrowserAccess = Plugin.Instance?.Configuration.EnableLanBrowserAccess == true,
                     ytdlp = _ytdlpPath ?? "not found",
                     ytdlpVersion = _ytdlpVersion,
                     managedYtdlp = _ytdlpPath == _ytdlpManager.ManagedPath,
@@ -268,6 +278,12 @@ public sealed class DownloaderHostedService : BackgroundService
             if (IsRoute(method, path, "POST", "/directories"))
             {
                 await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsRoute(method, path, "POST", "/extension/config"))
+            {
+                await WriteBrowserExtensionConfigAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -726,6 +742,140 @@ public sealed class DownloaderHostedService : BackgroundService
         }
     }
 
+    private static IEnumerable<string> ListenerPrefixes()
+    {
+        yield return $"http://localhost:{Port}/";
+
+        if (Plugin.Instance?.Configuration.EnableLanBrowserAccess != true)
+        {
+            yield break;
+        }
+
+        foreach (var address in LanAddresses())
+        {
+            yield return $"http://{address}:{Port}/";
+        }
+    }
+
+    private static IEnumerable<IPAddress> LanAddresses()
+    {
+        foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (networkInterface.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            var properties = networkInterface.GetIPProperties();
+            foreach (var address in properties.UnicastAddresses)
+            {
+                if (address.Address.AddressFamily == AddressFamily.InterNetwork
+                    && !IPAddress.IsLoopback(address.Address))
+                {
+                    yield return address.Address;
+                }
+            }
+        }
+    }
+
+    private static string EffectiveAdvertisedServerUrl()
+    {
+        var configuration = Plugin.Instance?.Configuration;
+        var configuredUrl = configuration?.AdvertisedServerUrl?.Trim();
+        if (IsValidHttpServerUrl(configuredUrl))
+        {
+            return TrimTrailingSlash(configuredUrl!);
+        }
+
+        if (configuration?.EnableLanBrowserAccess == true)
+        {
+            var address = LanAddresses().FirstOrDefault();
+            if (address is not null)
+            {
+                return $"http://{address}:{Port}";
+            }
+        }
+
+        return $"http://localhost:{Port}";
+    }
+
+    private static bool IsValidHttpServerUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrWhiteSpace(uri.Host);
+
+    private static string TrimTrailingSlash(string value)
+    {
+        var end = value.Length;
+        while (end > 0 && value[end - 1] == '/')
+        {
+            end--;
+        }
+
+        return value[..end];
+    }
+
+    private static async Task WriteBrowserExtensionConfigAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var result = await WriteBrowserExtensionConfigFileAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            await SendJsonAsync(context.Response, 503, new { error = "Browser API token is not available" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await SendJsonAsync(context.Response, 200, new
+        {
+            ok = true,
+            serverUrl = result.Config.ServerUrl,
+            extensionDirectory = result.ExtensionDirectory,
+            configPath = result.ConfigPath
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task TryWriteBrowserExtensionConfigFileAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = await WriteBrowserExtensionConfigFileAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // The API can still run if the bundled extension folder is not writable.
+        }
+    }
+
+    private static async Task<BrowserExtensionConfigWriteResult?> WriteBrowserExtensionConfigFileAsync(CancellationToken cancellationToken)
+    {
+        EnsureBrowserApiToken();
+        var token = Plugin.Instance?.Configuration.BrowserApiToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        var extensionDirectory = BrowserExtensionDirectory();
+        Directory.CreateDirectory(extensionDirectory);
+        var configPath = Path.Combine(extensionDirectory, "config.json");
+        var extensionConfig = new BrowserExtensionConfig(EffectiveAdvertisedServerUrl(), token);
+        await using (var stream = File.Create(configPath))
+        {
+            await JsonSerializer.SerializeAsync(stream, extensionConfig, WebJsonOptions, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new BrowserExtensionConfigWriteResult(extensionConfig, extensionDirectory, configPath);
+    }
+
+    private static string BrowserExtensionDirectory()
+    {
+        var assemblyLocation = typeof(DownloaderHostedService).Assembly.Location;
+        var pluginDirectory = string.IsNullOrWhiteSpace(assemblyLocation)
+            ? AppContext.BaseDirectory
+            : Path.GetDirectoryName(assemblyLocation) ?? AppContext.BaseDirectory;
+
+        return Path.Combine(pluginDirectory, "chrome-extension");
+    }
+
     private static void EnsureBrowserApiToken()
     {
         var plugin = Plugin.Instance;
@@ -747,6 +897,12 @@ public sealed class DownloaderHostedService : BackgroundService
 
     private static async Task SendBrowserTokenAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
+        if (!IsLocalRequest(context.Request))
+        {
+            await SendJsonAsync(context.Response, 403, new { error = "Browser token pairing is only available on the Jellyfin server computer" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!IsBrowserTokenPairingOrigin(context.Request.Headers["Origin"]))
         {
             await SendJsonAsync(context.Response, 403, new { error = "Browser token pairing is only available to browser extensions" }, cancellationToken).ConfigureAwait(false);
@@ -762,6 +918,17 @@ public sealed class DownloaderHostedService : BackgroundService
         }
 
         await SendJsonAsync(context.Response, 200, new { apiToken = token }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool IsLocalRequest(HttpListenerRequest request)
+    {
+        var remoteAddress = request.RemoteEndPoint?.Address;
+        if (remoteAddress is null)
+        {
+            return true;
+        }
+
+        return IPAddress.IsLoopback(remoteAddress);
     }
 
     private static bool IsAuthorized(HttpListenerRequest request)
@@ -920,4 +1087,8 @@ public sealed class DownloaderHostedService : BackgroundService
     private sealed record DownloadStatus(string Status, string Title, string? Error, string Target);
 
     private sealed record SaveType(string Label, string Quality, string Icon, string Target, string? AudioFormat = null, int? ChapterPercent = null);
+
+    private sealed record BrowserExtensionConfig(string ServerUrl, string ApiToken);
+
+    private sealed record BrowserExtensionConfigWriteResult(BrowserExtensionConfig Config, string ExtensionDirectory, string ConfigPath);
 }

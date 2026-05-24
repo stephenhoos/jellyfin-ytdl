@@ -9,7 +9,7 @@
   ],
   "host_permissions": [
     "*://*.youtube.com/*",
-    "http://localhost:9876/*"
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"
