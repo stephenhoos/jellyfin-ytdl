@@ -1,5 +1,7 @@
 # Jellyfin YtdlArchive
 
+[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=stephenhoos_jellyfin-ytdl)](https://sonarcloud.io/summary/new_code?id=stephenhoos_jellyfin-ytdl)
+
 Public beta: `0.0.0.2`
 
 Chrome extension plus Jellyfin plugin for adding a download button to YouTube
