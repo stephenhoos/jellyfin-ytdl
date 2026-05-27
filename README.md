@@ -121,6 +121,28 @@ use this downloader", set the Chrome extension server URL to the Jellyfin
 server's LAN address, and click "Update Chrome extension config" before loading
 or reloading the bundled extension.
 
+For your own security, create a dedicated Chrome profile for this extension and
+use that profile only for Jellyfin YtdlArchive downloads:
+
+1. Open Chrome.
+2. Click the profile button in the top-right corner.
+3. Click Add, then Continue without an account unless you specifically want sync.
+4. Name the profile `YtdlArchive` or `Jellyfin Downloads`.
+5. In that new profile, open `chrome://extensions`.
+6. Enable Developer mode.
+7. Click Load unpacked and select the bundled `chrome-extension` folder.
+8. Configure the extension with the Jellyfin server URL and Browser API token.
+
+A separate profile improves security because Chrome extension storage, cookies,
+site sessions, browsing history, and installed extensions are isolated per
+profile. YtdlArchive does not ask for access to read pages across the web and is
+not designed to capture logins, cookies, or login tokens from other sites. The
+dedicated profile is for protecting you through compartmentalization: it keeps
+the downloader token and this extension away from your everyday browsing
+profile, signed-in websites, synced data, and other extensions. It also makes it
+easier to remove access later: delete the dedicated profile or regenerate the
+Browser API token in Jellyfin.
+
 Current save targets include video downloads at best, 1080p, 720p, or 480p;
 music and podcast audio as MP3, M4A, or Opus; and audiobook saves as M4A or M4B
 with optional rough 10% or 20% chapter breaks.
@@ -129,6 +151,8 @@ with optional rough 10% or 20% chapter breaks.
 
 - The downloader API requires the Browser API token for localhost and LAN
   traffic.
+- Use a dedicated Chrome profile for this extension so the downloader token is
+  isolated from your everyday browsing profile and other extensions.
 - Downloads are restricted to YouTube hosts by default.
 - Managed `yt-dlp` downloads are checked against the published SHA-256 sums.
 - Folder creation is restricted to the configured archive roots and their parent
