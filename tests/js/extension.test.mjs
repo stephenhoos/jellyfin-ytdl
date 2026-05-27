@@ -40,7 +40,7 @@ class FakeElement {
     this.listeners = new Map();
     this.classList = new FakeClassList();
     this.textContent = '';
-    this.innerHTML = '';
+    this._innerHTML = '';
     this.className = '';
     this.type = '';
     this.value = '';
@@ -53,6 +53,26 @@ class FakeElement {
 
   get id() {
     return this._id;
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = value;
+    this.children = [];
+    if (String(value).includes('ytdl-text')) {
+      const icon = new FakeElement('span', this.ownerDocument);
+      icon.className = 'ytdl-icon';
+      icon.textContent = '⬇';
+      this.appendChild(icon);
+
+      const text = new FakeElement('span', this.ownerDocument);
+      text.className = 'ytdl-text';
+      text.textContent = 'DOWNLOAD';
+      this.appendChild(text);
+    }
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
   }
 
   appendChild(child) {
@@ -77,9 +97,7 @@ class FakeElement {
 
   querySelector(selector) {
     if (selector === '.ytdl-text') {
-      const text = new FakeElement('span', this.ownerDocument);
-      text.className = 'ytdl-text';
-      return text;
+      return this.children.find(child => child.className === 'ytdl-text') ?? null;
     }
 
     return null;
@@ -166,6 +184,17 @@ function pickerLabels(picker) {
   return pickerItems(picker).map(item => item.children[1].textContent);
 }
 
+function installPopupDocument() {
+  const document = new FakeDocument();
+  for (const id of ['dot', 'status-title', 'status-sub', 'btn-check', 'api-token', 'btn-save-token', 'btn-show-token']) {
+    const element = document.createElement(id === 'api-token' ? 'input' : 'div');
+    element.id = id;
+  }
+
+  globalThis.document = document;
+  return document;
+}
+
 test('content script injects the download button on watch pages', async () => {
   const document = new FakeDocument();
   globalThis.document = document;
@@ -208,7 +237,9 @@ test('content script queues downloads and reports completed status', async () =>
     return 1;
   };
   globalThis.clearInterval = () => {};
-  globalThis.setTimeout = () => {};
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
   installChromeStorage();
   globalThis.fetch = async (url, options) => {
     if (url.endsWith('/save-types')) {
@@ -251,6 +282,141 @@ test('content script queues downloads and reports completed status', async () =>
   await flushAsync();
 
   assert.match(document.getElementById('ytdl-toast').textContent, /Saved video|Downloading/);
+});
+
+test('content script reports failed download status and resets the button', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setInterval = (callback) => {
+    callback();
+    return 1;
+  };
+  globalThis.clearInterval = () => {};
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
+  installChromeStorage();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({
+          saveTypes: [
+            { label: 'Best to Other', quality: 'best', icon: '*', target: 'other' }
+          ]
+        })
+      };
+    }
+
+    if (url.endsWith('/download')) {
+      return {
+        ok: true,
+        json: async () => ({ queued: true, saveTo: '/media' })
+      };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ': {
+          status: 'error',
+          error: 'disk full'
+        }
+      })
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  const item = pickerItems(document.getElementById('ytdl-picker'))[0];
+  item.listeners.get('click')({ stopPropagation() {} });
+  await flushAsync(40);
+
+  assert.equal(document.getElementById('ytdl-btn').querySelector('.ytdl-text').textContent, 'DOWNLOAD');
+  assert.match(document.getElementById('ytdl-toast').textContent, /disk full/);
+});
+
+test('content script shows server errors from download queue attempts', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setInterval = () => 1;
+  globalThis.clearInterval = () => {};
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
+  installChromeStorage();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({
+          saveTypes: [
+            { label: 'Best to Other', quality: 'best', icon: '*', target: 'other' }
+          ]
+        })
+      };
+    }
+
+    return {
+      ok: false,
+      statusText: 'Bad Request',
+      json: async () => ({ error: 'bad URL' })
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  pickerItems(document.getElementById('ytdl-picker'))[0].listeners.get('click')({ stopPropagation() {} });
+  await flushAsync();
+
+  assert.equal(document.getElementById('ytdl-btn').querySelector('.ytdl-text').textContent, 'DOWNLOAD');
+  assert.match(document.getElementById('ytdl-toast').textContent, /bad URL/);
+});
+
+test('content script reinjects after YouTube SPA navigation', async () => {
+  const document = new FakeDocument();
+  let observerCallback;
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=first',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+
+    observe() {}
+  };
+  installChromeStorage();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ saveTypes: [{ label: 'Best to Other', quality: 'best', target: 'other' }] })
+  });
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  assert.ok(document.getElementById('ytdl-btn-wrap'));
+
+  globalThis.location.href = 'https://www.youtube.com/watch?v=second';
+  observerCallback();
+  await flushAsync();
+
+  assert.ok(document.getElementById('ytdl-btn-wrap'));
 });
 
 test('content script renders every save type as a reachable menu option', async () => {
@@ -345,13 +511,7 @@ test('content script renders every save type as a reachable menu option', async 
 });
 
 test('popup script reports a healthy server and saves tokens', async () => {
-  const document = new FakeDocument();
-  for (const id of ['dot', 'status-title', 'status-sub', 'btn-check', 'api-token', 'btn-save-token', 'btn-show-token']) {
-    const element = document.createElement(id === 'api-token' ? 'input' : 'div');
-    element.id = id;
-  }
-
-  globalThis.document = document;
+  const document = installPopupDocument();
   installChromeStorage('secret-token');
   globalThis.fetch = async () => ({
     ok: true,
@@ -383,13 +543,8 @@ test('popup script reports a healthy server and saves tokens', async () => {
 });
 
 test('popup script explains missing token responses', async () => {
-  const document = new FakeDocument();
-  for (const id of ['dot', 'status-title', 'status-sub', 'btn-check', 'api-token', 'btn-save-token', 'btn-show-token']) {
-    const element = document.createElement(id === 'api-token' ? 'input' : 'div');
-    element.id = id;
-  }
-
-  globalThis.document = document;
+  const document = installPopupDocument();
+  globalThis.chrome = undefined;
   installChromeStorage('');
   globalThis.fetch = async () => ({
     ok: false,
@@ -401,6 +556,85 @@ test('popup script explains missing token responses', async () => {
 
   assert.equal(document.getElementById('status-title').textContent, 'Token required');
   assert.match(document.getElementById('status-sub').textContent, /Browser API token/);
+});
+
+test('popup script pairs a local browser token when storage is empty', async () => {
+  const document = installPopupDocument();
+  globalThis.chrome = undefined;
+  const store = installChromeStorage('');
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/browser-token')) {
+      return {
+        ok: true,
+        json: async () => ({ apiToken: 'paired-token' })
+      };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({ ytdlp: 'found', jellyfin: { enabled: false } })
+    };
+  };
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(store.apiToken, 'paired-token');
+  assert.equal(document.getElementById('api-token').value, 'paired-token');
+  assert.match(document.getElementById('status-sub').textContent, /not configured/);
+});
+
+test('popup script refreshes the token through runtime messaging after a 401', async () => {
+  const document = installPopupDocument();
+  const store = { apiToken: 'old-token' };
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message, callback) {
+        if (message.type === 'ytdlArchive.getConnectionSettings') {
+          callback({ serverUrl: 'http://lan.example:9876' });
+          return;
+        }
+
+        callback({ apiToken: 'new-token' });
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+  let pings = 0;
+  globalThis.fetch = async () => {
+    pings += 1;
+    return pings === 1
+      ? { ok: false, status: 401, json: async () => ({}) }
+      : { ok: true, json: async () => ({ ytdlp: 'found', jellyfin: { enabled: false } }) };
+  };
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(store.apiToken, 'new-token');
+  assert.equal(document.getElementById('status-title').textContent, 'Server is running ✓');
+});
+
+test('popup script reports server connectivity errors', async () => {
+  const document = installPopupDocument();
+  globalThis.chrome = undefined;
+  installChromeStorage('token');
+  globalThis.fetch = async () => {
+    throw new Error('fetch failed');
+  };
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(document.getElementById('status-title').textContent, 'Server not running');
+  assert.match(document.getElementById('status-sub').textContent, /Restart Jellyfin/);
 });
 
 test('background script returns cached and refreshed browser tokens', async () => {
