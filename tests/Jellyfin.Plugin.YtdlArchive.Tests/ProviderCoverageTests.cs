@@ -244,6 +244,8 @@ public sealed class ProviderCoverageTests
             libraryReconciler: null!);
 
         await service.StopAsync(CancellationToken.None);
+
+        Assert.IsAssignableFrom<IHostedService>(service);
     }
 
     [Fact]
