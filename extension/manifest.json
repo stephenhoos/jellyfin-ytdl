@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Download Button",
-  "version": "0.0.0.1",
+  "version": "0.0.0.2",
   "description": "Adds a YouTube download button for saving videos, music, podcasts, and audiobooks into Jellyfin YtdlArchive libraries.",
   "permissions": [
     "storage",

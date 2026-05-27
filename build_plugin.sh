@@ -6,9 +6,9 @@ PROJECT="$ROOT_DIR/src/Jellyfin.Plugin.YtdlArchive/Jellyfin.Plugin.YtdlArchive.c
 SOLUTION="$ROOT_DIR/JellyfinYtdl.sln"
 DIST_DIR="$ROOT_DIR/dist/YtdlArchive"
 PACKAGE_DIR="$ROOT_DIR/dist/package"
-ZIP_PATH="$PACKAGE_DIR/YtdlArchive-0.0.0.1.zip"
+ZIP_PATH="$PACKAGE_DIR/YtdlArchive-0.0.0.2.zip"
 EXTENSION_DIST_DIR="$DIST_DIR/chrome-extension"
-EXTENSION_ZIP_PATH="$PACKAGE_DIR/YtdlArchive-ChromeExtension-0.0.0.1.zip"
+EXTENSION_ZIP_PATH="$PACKAGE_DIR/YtdlArchive-ChromeExtension-0.0.0.2.zip"
 
 cd "$ROOT_DIR"
 
@@ -53,6 +53,8 @@ rm -f "$DIST_DIR"/*.pdb
   find . -name '._*' -delete
   zip -q -r "$ZIP_PATH" .
 )
+
+find "$PACKAGE_DIR" -name '._*' -delete
 
 echo "Plugin folder: $DIST_DIR"
 echo "Plugin zip:    $ZIP_PATH"

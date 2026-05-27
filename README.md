@@ -1,12 +1,14 @@
 # Jellyfin YtdlArchive
 
-Public beta: `0.0.0.1`
+Public beta: `0.0.0.2`
 
 Chrome extension plus Jellyfin plugin for adding a download button to YouTube
-pages. The Jellyfin plugin hosts a token-gated local downloader server at
-`http://localhost:9876`, so the Chrome extension does not need a separate
-terminal process. Downloads are saved in a Jellyfin-friendly archive shape with
-yt-dlp sidecar metadata and thumbnails.
+pages. The Jellyfin plugin hosts a token-gated downloader server at
+`http://localhost:9876` and can also listen on the Jellyfin server's LAN address
+so Chrome extensions on other computers in the home network can send downloads
+to the same archive. The Chrome extension does not need a separate terminal
+process. Downloads are saved in a Jellyfin-friendly archive shape with yt-dlp
+sidecar metadata and thumbnails.
 
 ## Contents
 
@@ -21,7 +23,10 @@ yt-dlp sidecar metadata and thumbnails.
 Install and start the Jellyfin plugin. It starts the downloader server
 automatically when Jellyfin starts.
 
-The embedded server listens on `http://localhost:9876`.
+The embedded server listens on `http://localhost:9876` by default. Enable LAN
+browser access in the plugin settings to allow Chrome extensions on other
+computers in the same LAN to reach the downloader at the Jellyfin server's LAN
+address, such as `http://192.168.1.50:9876`.
 On startup, the plugin installs or updates its own managed `yt-dlp` binary under
 the Jellyfin plugin data folder and uses that copy for downloads. You can turn
 auto-install/update off or set a custom executable path from the plugin
@@ -91,7 +96,7 @@ validates that Jellyfin host assemblies are not bundled, and writes:
 
 ```text
 dist/YtdlArchive/
-dist/package/YtdlArchive-0.0.0.1.zip
+dist/package/YtdlArchive-0.0.0.2.zip
 ```
 
 For a manual smoke test, create a `YtdlArchive` folder under your Jellyfin
@@ -111,13 +116,19 @@ extension popup. Open a YouTube video and use the red `DOWNLOAD` button in the
 player. The picker fetches its save types from the Jellyfin plugin, so plugin
 updates can change the Chrome menu without editing the extension.
 
+For another computer on the LAN, enable "Allow Chrome extensions on my LAN to
+use this downloader", set the Chrome extension server URL to the Jellyfin
+server's LAN address, and click "Update Chrome extension config" before loading
+or reloading the bundled extension.
+
 Current save targets include video downloads at best, 1080p, 720p, or 480p;
 music and podcast audio as MP3, M4A, or Opus; and audiobook saves as M4A or M4B
 with optional rough 10% or 20% chapter breaks.
 
 ## Security Notes
 
-- The local downloader API requires the Browser API token.
+- The downloader API requires the Browser API token for localhost and LAN
+  traffic.
 - Downloads are restricted to YouTube hosts by default.
 - Managed `yt-dlp` downloads are checked against the published SHA-256 sums.
 - Folder creation is restricted to the configured archive roots and their parent
