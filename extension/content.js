@@ -1,11 +1,7 @@
 'use strict';
 
 const {
-  DEFAULT_SERVER,
-  normalizeServerUrl,
-  sendRuntimeMessage,
-  storageGet,
-  storageSet
+  apiFetch
 } = globalThis.YtdlArchiveCommon;
 let injected = false;
 let saveTypes = [
@@ -21,80 +17,9 @@ let saveTypes = [
 ];
 let saveTypesLoadPromise = null;
 
-async function requestBrowserApiToken(forceRefresh = false) {
-  const response = await sendRuntimeMessage({
-    type: 'ytdlArchive.getBrowserApiToken',
-    forceRefresh
-  });
-  if (response?.apiToken) {
-    await storageSet({ apiToken: response.apiToken });
-    return response.apiToken;
-  }
-
-  throw new Error(response?.error || 'Could not pair browser API token');
-}
-
-async function serverUrl() {
-  if (chrome.runtime?.sendMessage) {
-    const response = await sendRuntimeMessage({ type: 'ytdlArchive.getConnectionSettings' }).catch(() => null);
-    if (response?.serverUrl) {
-      return response.serverUrl;
-    }
-  }
-
-  const settings = await storageGet({ serverUrl: DEFAULT_SERVER });
-  return normalizeServerUrl(settings.serverUrl);
-}
-
-async function fetchBrowserApiToken() {
-  if (chrome.runtime?.sendMessage) {
-    return requestBrowserApiToken(true);
-  }
-
-  const response = await fetch(`${await serverUrl()}/browser-token`);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.apiToken) {
-    throw new Error(response.status === 401 ? 'Token required' : (payload?.error || response.statusText || 'Could not pair browser API token'));
-  }
-
-  await storageSet({ apiToken: payload.apiToken });
-  return payload.apiToken;
-}
-
-async function browserApiToken() {
-  const settings = await storageGet({ apiToken: '' });
-  if (settings.apiToken) {
-    return settings.apiToken;
-  }
-
-  return fetchBrowserApiToken();
-}
-
-async function apiFetch(path, options) {
-  const apiToken = await browserApiToken();
-  const headers = new Headers(options?.headers);
-  headers.set('X-YtdlArchive-Token', apiToken);
-
-  const fetchOptions = options ? { ...options, headers } : { headers };
-  const baseUrl = await serverUrl();
-  let response = await fetch(`${baseUrl}${path}`, fetchOptions);
-  if (response.status === 401) {
-    headers.set('X-YtdlArchive-Token', await requestBrowserApiToken(true));
-    response = await fetch(`${baseUrl}${path}`, fetchOptions);
-  }
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const tokenHint = response.status === 401 ? ' Open the extension popup and set the Browser API token from Jellyfin.' : '';
-    throw new Error((payload?.error || response.statusText || 'Request failed') + tokenHint);
-  }
-
-  return payload;
-}
-
 function loadSaveTypes() {
   if (!saveTypesLoadPromise) {
-    saveTypesLoadPromise = apiFetch('/save-types')
+    saveTypesLoadPromise = apiFetch('/save-types', {}, { includeTokenHint: true })
       .then((data) => {
         if (data && Array.isArray(data.saveTypes) && data.saveTypes.length > 0) {
           saveTypes = data.saveTypes;
