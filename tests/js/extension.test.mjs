@@ -170,6 +170,10 @@ async function importFresh(path) {
   return import(`${pathToFileURL(path).href}?t=${Date.now()}-${Math.random()}`);
 }
 
+function importDirect(path) {
+  return import(`${pathToFileURL(path).href}?t=${Date.now()}-${Math.random()}`);
+}
+
 async function flushAsync(turns = 12) {
   for (let index = 0; index < turns; index += 1) {
     await Promise.resolve();
@@ -343,6 +347,77 @@ test('content script reports failed download status and resets the button', asyn
   assert.match(document.getElementById('ytdl-toast').textContent, /disk full/);
 });
 
+test('content script refreshes tokens after authorized requests return 401', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  const store = { apiToken: 'old-token' };
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message, callback) {
+        callback(message.type === 'ytdlArchive.getConnectionSettings'
+          ? { serverUrl: 'http://localhost:9876' }
+          : { apiToken: 'new-token' });
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+  let saveTypeCalls = 0;
+  globalThis.fetch = async () => {
+    saveTypeCalls += 1;
+    return saveTypeCalls === 1
+      ? { ok: false, status: 401, json: async () => ({}) }
+      : { ok: true, json: async () => ({ saveTypes: [{ label: 'Best to Other', quality: 'best', target: 'other' }] }) };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+
+  assert.equal(store.apiToken, 'new-token');
+  assert.ok(document.getElementById('ytdl-btn-wrap'));
+});
+
+test('content script ignores picker clicks while the button is busy', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  installChromeStorage();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ saveTypes: [{ label: 'Best to Other', quality: 'best', target: 'other' }] })
+  });
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  const button = document.getElementById('ytdl-btn');
+  button.classList.add('loading');
+  button.listeners.get('click')({ stopPropagation() {} });
+
+  assert.equal(document.getElementById('ytdl-picker').classList.contains('open'), false);
+});
+
 test('content script shows server errors from download queue attempts', async () => {
   const document = new FakeDocument();
   globalThis.document = document;
@@ -387,6 +462,42 @@ test('content script shows server errors from download queue attempts', async ()
   assert.match(document.getElementById('ytdl-toast').textContent, /bad URL/);
 });
 
+test('content script handles unexpected queue responses', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
+  installChromeStorage();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({ saveTypes: [{ label: 'Best to Other', quality: 'best', target: 'other' }] })
+      };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({})
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  pickerItems(document.getElementById('ytdl-picker'))[0].listeners.get('click')({ stopPropagation() {} });
+  await flushAsync();
+
+  assert.match(document.getElementById('ytdl-toast').textContent, /Server error/);
+});
+
 test('content script reinjects after YouTube SPA navigation', async () => {
   const document = new FakeDocument();
   let observerCallback;
@@ -414,7 +525,37 @@ test('content script reinjects after YouTube SPA navigation', async () => {
 
   globalThis.location.href = 'https://www.youtube.com/watch?v=second';
   observerCallback();
+  await flushAsync(40);
+
+  assert.ok(document.getElementById('ytdl-btn-wrap'));
+});
+
+test('content script resets injection state when the wrapper disappears', async () => {
+  const document = new FakeDocument();
+  let observerCallback;
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=first',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+
+    observe() {}
+  };
+  installChromeStorage();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ saveTypes: [{ label: 'Best to Other', quality: 'best', target: 'other' }] })
+  });
+
+  await importFresh('./extension/content.js');
   await flushAsync();
+  document.getElementById('ytdl-btn-wrap').remove();
+  observerCallback();
+  await flushAsync(40);
 
   assert.ok(document.getElementById('ytdl-btn-wrap'));
 });
@@ -623,6 +764,87 @@ test('popup script refreshes the token through runtime messaging after a 401', a
   assert.equal(document.getElementById('status-title').textContent, 'Server is running ✓');
 });
 
+test('popup script pairs through runtime messaging when storage is empty', async () => {
+  const document = installPopupDocument();
+  const store = { apiToken: '' };
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message, callback) {
+        callback(message.type === 'ytdlArchive.getConnectionSettings'
+          ? { serverUrl: 'http://lan.example:9876' }
+          : { apiToken: 'runtime-token' });
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ ytdlp: 'found', jellyfin: { enabled: false } })
+  });
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(store.apiToken, 'runtime-token');
+  assert.equal(document.getElementById('api-token').value, 'runtime-token');
+});
+
+test('popup script reports runtime token pairing failures', async () => {
+  const document = installPopupDocument();
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message, callback) {
+        callback(message.type === 'ytdlArchive.getConnectionSettings'
+          ? { serverUrl: 'http://lan.example:9876' }
+          : { error: 'pairing disabled' });
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, apiToken: '' });
+        },
+        set(_values, callback) {
+          callback();
+        }
+      }
+    }
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({})
+  });
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(document.getElementById('status-title').textContent, 'Server not running');
+});
+
+test('popup script reports non-token server errors', async () => {
+  const document = installPopupDocument();
+  globalThis.chrome = undefined;
+  installChromeStorage('token');
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 500,
+    statusText: 'Internal Server Error',
+    json: async () => ({ error: 'boom' })
+  });
+
+  await importFresh('./extension/popup.js');
+
+  assert.equal(document.getElementById('status-title').textContent, 'Server not running');
+});
+
 test('popup script reports server connectivity errors', async () => {
   const document = installPopupDocument();
   globalThis.chrome = undefined;
@@ -635,6 +857,61 @@ test('popup script reports server connectivity errors', async () => {
 
   assert.equal(document.getElementById('status-title').textContent, 'Server not running');
   assert.match(document.getElementById('status-sub').textContent, /Restart Jellyfin/);
+});
+
+test('common runtime messaging rejects missing runtime and runtime errors', async () => {
+  await importFresh('./extension/common.js');
+  globalThis.chrome = {};
+  await assert.rejects(
+    globalThis.YtdlArchiveCommon.sendRuntimeMessage({ type: 'missing' }),
+    /Chrome runtime messaging/
+  );
+
+  globalThis.chrome = {
+    runtime: {
+      lastError: { message: 'runtime exploded' },
+      sendMessage(_message, callback) {
+        callback();
+      }
+    }
+  };
+
+  await assert.rejects(
+    globalThis.YtdlArchiveCommon.sendRuntimeMessage({ type: 'boom' }),
+    /runtime exploded/
+  );
+});
+
+test('background script imports common helpers in a service worker context', async () => {
+  let imported;
+  delete globalThis.YtdlArchiveCommon;
+  globalThis.importScripts = (path) => {
+    imported = path;
+    globalThis.YtdlArchiveCommon = {
+      DEFAULT_SERVER: 'http://localhost:9876',
+      normalizeServerUrl(value) {
+        return String(value).replace(/\/$/, '');
+      },
+      storageGet(defaults) {
+        return Promise.resolve(defaults);
+      },
+      storageSet() {
+        return Promise.resolve();
+      }
+    };
+  };
+  globalThis.chrome = {
+    runtime: {
+      onMessage: {
+        addListener() {}
+      }
+    }
+  };
+
+  await importDirect('./extension/background.js');
+
+  assert.equal(imported, 'common.js');
+  delete globalThis.importScripts;
 });
 
 test('background script returns cached and refreshed browser tokens', async () => {
@@ -684,6 +961,81 @@ test('background script returns cached and refreshed browser tokens', async () =
     { apiToken: 'fresh-token' });
   assert.equal(store.apiToken, 'fresh-token');
   assert.equal(tokenFetches, 1);
+});
+
+test('background script rejects token fetches for invalid configured URLs', async () => {
+  let listener;
+  const store = { apiToken: '', serverUrl: 'not a url' };
+  globalThis.chrome = {
+    runtime: {
+      onMessage: {
+        addListener(callback) {
+          listener = callback;
+        }
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+  globalThis.fetch = async () => {
+    throw new Error('should not fetch');
+  };
+
+  await importFresh('./extension/background.js');
+  const response = await sendExtensionMessage(listener, {
+    type: 'ytdlArchive.getBrowserApiToken',
+    forceRefresh: true
+  });
+
+  assert.match(response.error, /Configured token missing/);
+});
+
+test('background script ignores missing bundled config and failed token payloads', async () => {
+  let listener;
+  const store = { apiToken: '', serverUrl: 'http://localhost:9876' };
+  globalThis.chrome = {
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://test/${path}`;
+      },
+      onMessage: {
+        addListener(callback) {
+          listener = callback;
+        }
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+  globalThis.fetch = async (url) => url.startsWith('chrome-extension:')
+    ? { ok: false, json: async () => null }
+    : { ok: false, status: 500, statusText: 'Nope', json: async () => ({}) };
+
+  await importFresh('./extension/background.js');
+  const response = await sendExtensionMessage(listener, {
+    type: 'ytdlArchive.getBrowserApiToken',
+    forceRefresh: true
+  });
+
+  assert.match(response.error, /Nope|Could not pair/);
 });
 
 test('background script loads bundled LAN connection config', async () => {
