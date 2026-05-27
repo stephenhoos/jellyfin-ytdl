@@ -1,5 +1,8 @@
 import importlib.util
+import io
+import json
 import unittest
+from http import HTTPStatus
 from pathlib import Path
 
 
@@ -48,3 +51,126 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual(server.DOWNLOAD_DIR, server.archive_directory_for_target("video"))
         self.assertEqual(server.JELLYFIN_MUSIC_LIBRARY_NAME, server.library_name_for_target("music"))
         self.assertEqual(server.JELLYFIN_LIBRARY_NAME, server.library_name_for_target("video"))
+
+    def test_handler_requires_browser_token(self):
+        server = load_server_module()
+        server.BROWSER_API_TOKEN = "secret"
+
+        handler = make_handler(server, "GET", "/ping")
+        handler.do_GET()
+
+        self.assertEqual(HTTPStatus.UNAUTHORIZED, handler.status)
+        self.assertEqual("Missing or invalid YtdlArchive browser API token", handler.json_body["error"])
+
+    def test_handler_reports_ping_save_types_and_status(self):
+        server = load_server_module()
+        server.BROWSER_API_TOKEN = "secret"
+        server.active["https://youtu.be/dQw4w9WgXcQ"] = {"status": "done", "title": "Video"}
+
+        ping = make_handler(server, "GET", "/ping", token="secret", origin="https://www.youtube.com")
+        ping.do_GET()
+        self.assertEqual(HTTPStatus.OK, ping.status)
+        self.assertTrue(ping.json_body["ok"])
+        self.assertEqual("https://www.youtube.com", ping.headers_sent["Access-Control-Allow-Origin"])
+
+        save_types = make_handler(server, "GET", "/save-types", token="secret")
+        save_types.do_GET()
+        self.assertEqual(HTTPStatus.OK, save_types.status)
+        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 3)
+
+        status = make_handler(server, "GET", "/status", token="secret")
+        status.do_GET()
+        self.assertEqual("done", status.json_body["https://youtu.be/dQw4w9WgXcQ"]["status"])
+
+    def test_handler_rejects_bad_download_requests(self):
+        server = load_server_module()
+        server.BROWSER_API_TOKEN = "secret"
+
+        cases = [
+            (b"{not json", "Bad JSON"),
+            ({}, "Missing url"),
+            ({"url": "https://example.com/watch?v=dQw4w9WgXcQ"}, "Only YouTube URLs"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "4k"}, "Unsupported quality"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "audio", "audioFormat": "wav"}, "Unsupported audio format"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "podcast"}, "Unsupported target"),
+        ]
+
+        for payload, expected_error in cases:
+            with self.subTest(expected_error=expected_error):
+                handler = make_handler(server, "POST", "/download", payload, token="secret")
+                handler.do_POST()
+                self.assertEqual(HTTPStatus.BAD_REQUEST, handler.status)
+                self.assertIn(expected_error, handler.json_body["error"])
+
+    def test_handler_reports_missing_ytdlp_and_already_downloading(self):
+        server = load_server_module()
+        server.BROWSER_API_TOKEN = "secret"
+        payload = {"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "best", "target": "video"}
+
+        server.YTDLP = None
+        missing = make_handler(server, "POST", "/download", payload, token="secret")
+        missing.do_POST()
+        self.assertEqual(HTTPStatus.INTERNAL_SERVER_ERROR, missing.status)
+        self.assertIn("yt-dlp not found", missing.json_body["error"])
+
+        server.YTDLP = "yt-dlp"
+        server.active[payload["url"]] = {"status": "downloading"}
+        duplicate = make_handler(server, "POST", "/download", payload, token="secret")
+        duplicate.do_POST()
+        self.assertEqual(HTTPStatus.OK, duplicate.status)
+        self.assertEqual("already downloading", duplicate.json_body["reason"])
+
+    def test_handler_returns_not_found_for_unknown_routes(self):
+        server = load_server_module()
+        server.BROWSER_API_TOKEN = "secret"
+
+        get_handler = make_handler(server, "GET", "/missing", token="secret")
+        get_handler.do_GET()
+        self.assertEqual(HTTPStatus.NOT_FOUND, get_handler.status)
+
+        post_handler = make_handler(server, "POST", "/missing", {}, token="secret")
+        post_handler.do_POST()
+        self.assertEqual(HTTPStatus.NOT_FOUND, post_handler.status)
+
+
+class HeaderMap(dict):
+    def get(self, key, default=None):
+        return super().get(key, default)
+
+
+def make_handler(server, method, path, payload=None, token=None, origin=None):
+    class TestHandler(server.Handler):
+        @property
+        def json_body(self):
+            return json.loads(self.wfile.getvalue().decode())
+
+        def send_response(self, code, message=None):
+            self.status = HTTPStatus(code)
+
+        def send_header(self, keyword, value):
+            self.headers_sent[keyword] = value
+
+        def end_headers(self):
+            self.ended_headers = True
+
+    handler = object.__new__(TestHandler)
+    handler.command = method
+    handler.path = path
+    handler.headers = HeaderMap()
+    handler.headers_sent = {}
+    handler.ended_headers = False
+    if token:
+        handler.headers["X-YtdlArchive-Token"] = token
+    if origin:
+        handler.headers["Origin"] = origin
+
+    if payload is None:
+        body = b""
+    elif isinstance(payload, bytes):
+        body = payload
+    else:
+        body = json.dumps(payload).encode()
+    handler.headers["Content-Length"] = str(len(body))
+    handler.rfile = io.BytesIO(body)
+    handler.wfile = io.BytesIO()
+    return handler
