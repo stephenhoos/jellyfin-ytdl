@@ -1,6 +1,12 @@
 'use strict';
 
-const DEFAULT_SERVER = 'http://localhost:9876';
+const {
+  DEFAULT_SERVER,
+  normalizeServerUrl,
+  sendRuntimeMessage,
+  storageGet,
+  storageSet
+} = globalThis.YtdlArchiveCommon;
 let injected = false;
 let saveTypes = [
   { label: 'Best to Other', quality: 'best', icon: '★', target: 'other' },
@@ -14,36 +20,6 @@ let saveTypes = [
   { label: 'M4B Audiobook 10% chapters', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 10 }
 ];
 let saveTypesLoadPromise = null;
-
-function storageGet(defaults) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(defaults, resolve);
-  });
-}
-
-function storageSet(values) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set(values, resolve);
-  });
-}
-
-function sendRuntimeMessage(message) {
-  return new Promise((resolve, reject) => {
-    if (!chrome.runtime?.sendMessage) {
-      reject(new Error('Chrome runtime messaging is not available'));
-      return;
-    }
-
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-
-      resolve(response);
-    });
-  });
-}
 
 async function requestBrowserApiToken(forceRefresh = false) {
   const response = await sendRuntimeMessage({
@@ -67,8 +43,7 @@ async function serverUrl() {
   }
 
   const settings = await storageGet({ serverUrl: DEFAULT_SERVER });
-  const configured = String(settings.serverUrl || DEFAULT_SERVER).trim();
-  return configured.endsWith('/') ? configured.slice(0, -1) : configured;
+  return normalizeServerUrl(settings.serverUrl);
 }
 
 async function fetchBrowserApiToken() {
@@ -164,15 +139,27 @@ function targetIcon(target) {
   }
 }
 
+function stripTargetSuffix(label) {
+  const suffixes = [' to Music', ' to Podcast', ' to Audiobook', ' to Audiobooks', ' to Video', ' to Other'];
+  const lowerLabel = label.toLocaleLowerCase();
+  const suffix = suffixes.find((value) => lowerLabel.endsWith(value.toLocaleLowerCase()));
+  return suffix ? label.slice(0, -suffix.length) : label;
+}
+
+function shortenAudiobookLabel(label) {
+  const prefix = 'M4B Audiobook';
+  if (!label.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())) {
+    return label;
+  }
+
+  return `M4B${label.slice(prefix.length)}`;
+}
+
 function displayLabel(saveType) {
-  return saveType.label
-    .replace(/\s+to\s+Music$/i, '')
-    .replace(/\s+to\s+Podcast$/i, '')
-    .replace(/\s+to\s+Audiobooks?$/i, '')
-    .replace(/\s+to\s+Video$/i, '')
-    .replace(/\s+to\s+Other$/i, '')
-    .replace(/^M4B\s+Audiobook\s*/i, 'M4B ')
-    .replace(/\s+/g, ' ')
+  return shortenAudiobookLabel(stripTargetSuffix(String(saveType.label || '')))
+    .split(' ')
+    .filter(Boolean)
+    .join(' ')
     .trim();
 }
 

@@ -83,6 +83,7 @@ jobs:
           /d:sonar.python.coverage.reportPaths="coverage/python/coverage.xml"
           /d:sonar.python.version="3.13"
           /d:sonar.exclusions="tests/**"
+          /d:sonar.qualitygate.wait=true
           /d:sonar.scanner.scanAll=true
 
       - name: Build

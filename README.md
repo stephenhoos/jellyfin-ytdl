@@ -155,8 +155,10 @@ with optional rough 10% or 20% chapter breaks.
   isolated from your everyday browsing profile and other extensions.
 - Downloads are restricted to YouTube hosts by default.
 - Managed `yt-dlp` downloads are checked against the published SHA-256 sums.
-- Folder creation is restricted to the configured archive roots and their parent
-  media folder.
+- Folder creation is restricted to the archive roots configured in the plugin
+  settings and their parent media folder. You can use non-default music,
+  podcast, audiobook, and other archive paths by setting them on the Jellyfin
+  plugin configuration page.
 
 ## Quality Status
 

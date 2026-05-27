@@ -1,6 +1,12 @@
 'use strict';
 
-const DEFAULT_SERVER = 'http://localhost:9876';
+const {
+  DEFAULT_SERVER,
+  normalizeServerUrl,
+  sendRuntimeMessage,
+  storageGet,
+  storageSet
+} = globalThis.YtdlArchiveCommon;
 
 const dot        = document.getElementById('dot');
 const statusTitle = document.getElementById('status-title');
@@ -9,36 +15,6 @@ const btnCheck    = document.getElementById('btn-check');
 const tokenInput  = document.getElementById('api-token');
 const btnSaveToken = document.getElementById('btn-save-token');
 const btnShowToken = document.getElementById('btn-show-token');
-
-function storageGet(defaults) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(defaults, resolve);
-  });
-}
-
-function storageSet(values) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set(values, resolve);
-  });
-}
-
-function sendRuntimeMessage(message) {
-  return new Promise((resolve, reject) => {
-    if (!chrome.runtime?.sendMessage) {
-      reject(new Error('Chrome runtime messaging is not available'));
-      return;
-    }
-
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-
-      resolve(response);
-    });
-  });
-}
 
 async function requestBrowserApiToken(forceRefresh = false) {
   const response = await sendRuntimeMessage({
@@ -63,8 +39,7 @@ async function serverUrl() {
   }
 
   const settings = await storageGet({ serverUrl: DEFAULT_SERVER });
-  const configured = String(settings.serverUrl || DEFAULT_SERVER).trim();
-  return configured.endsWith('/') ? configured.slice(0, -1) : configured;
+  return normalizeServerUrl(settings.serverUrl);
 }
 
 async function fetchBrowserApiToken() {

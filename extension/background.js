@@ -1,24 +1,16 @@
 'use strict';
 
-const DEFAULT_SERVER = 'http://localhost:9876';
+if (typeof importScripts === 'function' && !globalThis.YtdlArchiveCommon) {
+  importScripts('common.js');
+}
+
+const {
+  DEFAULT_SERVER,
+  normalizeServerUrl,
+  storageGet,
+  storageSet
+} = globalThis.YtdlArchiveCommon;
 let configLoadPromise = null;
-
-function storageGet(defaults) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(defaults, resolve);
-  });
-}
-
-function storageSet(values) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set(values, resolve);
-  });
-}
-
-function normalizeServerUrl(value) {
-  const serverUrl = String(value || DEFAULT_SERVER).trim();
-  return serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
-}
 
 function isLocalServerUrl(serverUrl) {
   try {

@@ -144,7 +144,11 @@ function sendExtensionMessage(listener, message) {
   });
 }
 
-function importFresh(path) {
+async function importFresh(path) {
+  if (path !== './extension/common.js') {
+    await import(`${pathToFileURL('./extension/common.js').href}?t=${Date.now()}-${Math.random()}`);
+  }
+
   return import(`${pathToFileURL(path).href}?t=${Date.now()}-${Math.random()}`);
 }
 
