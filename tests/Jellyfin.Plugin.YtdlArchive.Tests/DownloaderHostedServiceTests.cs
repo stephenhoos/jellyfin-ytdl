@@ -228,6 +228,7 @@ public sealed class DownloaderHostedServiceTests
     [InlineData("GET", "/status", null)]
     [InlineData("POST", "/download", """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"flac"}""")]
     [InlineData("POST", "/directories", """{"parent":"","name":""}""")]
+    [InlineData("POST", "/extension/config", "{}")]
     [InlineData("POST", "/libraries/reconcile", "{}")]
     public async Task HandleAsync_RoutesKnownApiRequests(string method, string path, string? body)
     {
@@ -250,6 +251,68 @@ public sealed class DownloaderHostedServiceTests
 
             Assert.NotEqual(404, statusCode);
             Assert.NotEqual(string.Empty, responseBody);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ListenerPrefixes_UsesLocalhostWhenLanAccessIsDisabled()
+    {
+        EnsurePluginToken(Path.GetTempPath());
+        Plugin.Instance!.Configuration.EnableLanBrowserAccess = false;
+
+        var prefixes = InvokeStatic<IEnumerable<string>>("ListenerPrefixes").ToArray();
+
+        Assert.Equal(["http://localhost:9876/"], prefixes);
+    }
+
+    [Fact]
+    public void EffectiveAdvertisedServerUrl_UsesConfiguredUrlWithoutTrailingSlashes()
+    {
+        EnsurePluginToken(Path.GetTempPath());
+        Plugin.Instance!.Configuration.EnableLanBrowserAccess = false;
+        Plugin.Instance.Configuration.AdvertisedServerUrl = " http://192.168.1.50:9876/// ";
+
+        var result = InvokeStatic<string>("EffectiveAdvertisedServerUrl");
+
+        Assert.Equal("http://192.168.1.50:9876", result);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("chrome-extension://abcdef", true)]
+    [InlineData("moz-extension://abcdef", true)]
+    [InlineData("https://example.com", false)]
+    [InlineData("not a url", false)]
+    public void IsBrowserTokenPairingOrigin_AllowsOnlyExtensionOrEmptyOrigins(string? origin, bool expected)
+    {
+        var result = InvokeStatic<bool>("IsBrowserTokenPairingOrigin", origin);
+
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("chrome-extension://abcdef", 200)]
+    [InlineData("https://example.com", 403)]
+    public async Task SendBrowserTokenAsync_RequiresBrowserExtensionOrigin(string origin, int expectedStatus)
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            EnsurePluginToken(directory.FullName);
+            var service = new DownloaderHostedService(
+                NullLogger<DownloaderHostedService>.Instance,
+                ytdlpManager: null!,
+                libraryReconciler: null!);
+
+            var (statusCode, body) = await SendToHandlerAsync(service, "GET", "/browser-token", null, origin);
+
+            Assert.Equal(expectedStatus, statusCode);
+            Assert.NotEqual(string.Empty, body);
         }
         finally
         {
@@ -389,7 +452,8 @@ public sealed class DownloaderHostedServiceTests
         DownloaderHostedService service,
         string method,
         string path,
-        string? body)
+        string? body,
+        string? origin = null)
     {
         using var listener = new HttpListener();
         var port = Random.Shared.Next(20000, 50000);
@@ -400,6 +464,11 @@ public sealed class DownloaderHostedServiceTests
         using var client = new HttpClient();
         using var request = new HttpRequestMessage(new HttpMethod(method), $"http://localhost:{port}{path}");
         request.Headers.Add("X-YtdlArchive-Token", "test-token");
+        if (origin is not null)
+        {
+            request.Headers.Add("Origin", origin);
+        }
+
         if (body is not null)
         {
             request.Content = new StringContent(body);

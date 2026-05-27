@@ -62,6 +62,41 @@ public sealed class YtdlpManagerTests
     }
 
     [Fact]
+    public async Task GetVersionAsync_ReturnsExecutableVersionOutput()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var executable = Path.Combine(directory.FullName, OperatingSystem.IsWindows() ? "yt-dlp.cmd" : "yt-dlp");
+            await File.WriteAllTextAsync(
+                executable,
+                OperatingSystem.IsWindows()
+                    ? "@echo off\r\necho 2026.01.01\r\n"
+                    : "#!/bin/sh\necho 2026.01.01\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            var manager = new YtdlpManager(
+                new StaticHttpClientFactory(),
+                ServerPathsProxy.Create(directory.FullName),
+                NullLogger<YtdlpManager>.Instance);
+            typeof(YtdlpManager)
+                .GetField("_resolvedPath", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(manager, executable);
+
+            var result = await manager.GetVersionAsync(CancellationToken.None);
+
+            Assert.Equal("2026.01.01", result);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MatchesSha256Async_ComparesDownloadedBinaryHash()
     {
         var directory = Directory.CreateTempSubdirectory();
