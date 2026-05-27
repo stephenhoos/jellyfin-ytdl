@@ -21,68 +21,12 @@ public sealed class YtdlAudioLocalProvider : ILocalMetadataProvider<Audio>
 
         var item = new Audio
         {
-            Name = metadata.Title,
-            OriginalTitle = metadata.OriginalTitle,
             Album = metadata.Album,
-            Artists = NonBlank(metadata.Artist),
-            AlbumArtists = NonBlank(metadata.Artist),
-            Overview = BuildOverview(metadata),
-            HomePageUrl = metadata.WebUrl,
-            PremiereDate = metadata.ReleaseDate?.UtcDateTime,
-            ProductionYear = metadata.ReleaseDate?.Year,
-            RunTimeTicks = metadata.Runtime?.Ticks,
-            Genres = metadata.Categories.ToArray(),
-            Tags = metadata.Tags.ToArray(),
-            Studios = NonBlank(metadata.ChannelName),
-            ForcedSortName = metadata.ReleaseDate is null
-                ? metadata.Title
-                : $"{metadata.ReleaseDate:yyyyMMdd}-{metadata.Title}"
+            Artists = YtdlAudioMetadataMapper.NonBlank(metadata.Artist),
+            AlbumArtists = YtdlAudioMetadataMapper.NonBlank(metadata.Artist)
         };
 
-        if (!string.IsNullOrWhiteSpace(metadata.Id))
-        {
-            item.ProviderIds[Constants.YouTubeProviderKey] = metadata.Id;
-        }
-
-        return new MetadataResult<Audio>
-        {
-            HasMetadata = true,
-            Item = item
-        };
-    }
-
-    private static string[] NonBlank(string? value)
-        => string.IsNullOrWhiteSpace(value) ? [] : [value];
-
-    private static string? BuildOverview(YouTubeAudioMetadata metadata)
-    {
-        var lines = new List<string>();
-        if (!string.IsNullOrWhiteSpace(metadata.Description))
-        {
-            lines.Add(metadata.Description);
-        }
-
-        var stats = new List<string>();
-        if (metadata.ViewCount.HasValue)
-        {
-            stats.Add($"{metadata.ViewCount.Value:N0} YouTube views");
-        }
-
-        if (metadata.LikeCount.HasValue)
-        {
-            stats.Add($"{metadata.LikeCount.Value:N0} likes");
-        }
-
-        if (!string.IsNullOrWhiteSpace(metadata.WebUrl))
-        {
-            stats.Add(metadata.WebUrl);
-        }
-
-        if (stats.Count > 0)
-        {
-            lines.Add(string.Join(" | ", stats));
-        }
-
-        return lines.Count == 0 ? null : string.Join(Environment.NewLine + Environment.NewLine, lines);
+        YtdlAudioMetadataMapper.ApplyCommonMetadata(item, metadata);
+        return YtdlAudioMetadataMapper.CreateResult(item);
     }
 }
