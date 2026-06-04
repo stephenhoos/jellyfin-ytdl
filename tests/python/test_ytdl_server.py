@@ -71,20 +71,14 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual(server.JELLYFIN_OTHER_LIBRARY_NAME, server.library_name_for_target("video"))
         self.assertEqual("", server.normalize_target("unknown"))
 
-    def test_m4b_helpers_find_finalize_and_build_chapters(self):
+    def test_m4b_helpers_find_and_finalize_downloads(self):
         server = load_server_module()
         with tempfile.TemporaryDirectory() as temp_root:
             temp_dir = Path(temp_root)
-            media_path = temp_dir / "A=B;C#D.m4a"
+            media_path = temp_dir / "Audiobook.m4a"
             media_path.write_text("", encoding="utf-8")
             media_path.with_suffix(".info.json").write_text('{"duration":100}', encoding="utf-8")
 
-            metadata = server.build_chapter_metadata(media_path, 20)
-
-            self.assertIn("title=A\\=B\\;C\\#D", metadata)
-            self.assertIn("START=0", metadata)
-            self.assertIn("END=20000", metadata)
-            self.assertIn("title=80%", metadata)
             self.assertEqual(media_path, server.find_newest_m4a(temp_dir, 0))
 
             server.finalize_m4b(temp_dir, 0)
@@ -98,15 +92,7 @@ class YtdlServerTests(unittest.TestCase):
             temp_dir = Path(temp_root)
 
             self.assertIsNone(server.find_newest_m4a(temp_dir, 0))
-            self.assertEqual(0, server.read_duration(temp_dir / "missing.m4a"))
             server.finalize_m4b(temp_dir, 0)
-
-            media_path = temp_dir / "No Duration.m4a"
-            media_path.write_text("", encoding="utf-8")
-            metadata = server.build_chapter_metadata(media_path, 10)
-
-            self.assertIn("title=No Duration", metadata)
-            self.assertNotIn("[CHAPTER]", metadata)
 
     def test_parse_and_validate_download_request_accepts_supported_targets(self):
         server = load_server_module()
@@ -153,7 +139,7 @@ class YtdlServerTests(unittest.TestCase):
         save_types = make_handler(server, "GET", "/save-types", token="secret")
         save_types.do_GET()
         self.assertEqual(HTTPStatus.OK, save_types.status)
-        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 13)
+        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 11)
         self.assertIn("audiobook", {save_type["target"] for save_type in save_types.json_body["saveTypes"]})
 
         status = make_handler(server, "GET", "/status", token="secret")

@@ -53,6 +53,40 @@
     return serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
   }
 
+  function targetGroupLabel(target) {
+    switch (target) {
+      case 'music':
+        return 'Music';
+      case 'podcast':
+        return 'Podcast';
+      case 'audiobook':
+        return 'Audiobook';
+      default:
+        return 'Video';
+    }
+  }
+
+  function stripTargetSuffix(label) {
+    const suffixes = [' to Music', ' to Podcast', ' to Audiobook', ' to Audiobooks', ' to Video', ' to Other'];
+    const lowerLabel = label.toLocaleLowerCase();
+    const suffix = suffixes.find((value) => lowerLabel.endsWith(value.toLocaleLowerCase()));
+    return suffix ? label.slice(0, -suffix.length) : label;
+  }
+
+  function groupedSaveTypes(saveTypes) {
+    const groups = new Map();
+    saveTypes.forEach((saveType) => {
+      const target = saveType.target || 'other';
+      if (!groups.has(target)) {
+        groups.set(target, []);
+      }
+
+      groups.get(target).push(saveType);
+    });
+
+    return groups;
+  }
+
   async function requestBrowserApiToken(forceRefresh = false, options = {}) {
     const response = await sendRuntimeMessage({
       type: 'ytdlArchive.getBrowserApiToken',
@@ -137,7 +171,10 @@
     requestBrowserApiToken,
     sendRuntimeMessage,
     serverUrl,
+    groupedSaveTypes,
     storageGet,
-    storageSet
+    storageSet,
+    stripTargetSuffix,
+    targetGroupLabel
   };
 })(globalThis);

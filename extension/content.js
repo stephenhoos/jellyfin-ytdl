@@ -2,7 +2,10 @@
 
 const {
   DEFAULT_SAVE_TYPES,
-  apiFetch
+  apiFetch,
+  groupedSaveTypes,
+  stripTargetSuffix,
+  targetGroupLabel
 } = globalThis.YtdlArchiveCommon;
 let injected = false;
 let saveTypes = DEFAULT_SAVE_TYPES;
@@ -29,19 +32,6 @@ function loadSaveTypes() {
   return saveTypesLoadPromise;
 }
 
-function targetGroupLabel(target) {
-  switch (target) {
-    case 'music':
-      return 'Music';
-    case 'podcast':
-      return 'Podcast';
-    case 'audiobook':
-      return 'Audiobook';
-    default:
-      return 'Video';
-  }
-}
-
 function targetIcon(target) {
   switch (target) {
     case 'music':
@@ -53,13 +43,6 @@ function targetIcon(target) {
     default:
       return '▾';
   }
-}
-
-function stripTargetSuffix(label) {
-  const suffixes = [' to Music', ' to Podcast', ' to Audiobook', ' to Audiobooks', ' to Video', ' to Other'];
-  const lowerLabel = label.toLocaleLowerCase();
-  const suffix = suffixes.find((value) => lowerLabel.endsWith(value.toLocaleLowerCase()));
-  return suffix ? label.slice(0, -suffix.length) : label;
 }
 
 function shortenAudiobookLabel(label) {
@@ -83,20 +66,6 @@ function displayIcon(saveType) {
   return saveType.target === 'podcast'
     ? targetIcon(saveType.target)
     : saveType.icon || targetIcon(saveType.target || 'other');
-}
-
-function groupedSaveTypes() {
-  const groups = new Map();
-  saveTypes.forEach((saveType) => {
-    const target = saveType.target || 'other';
-    if (!groups.has(target)) {
-      groups.set(target, []);
-    }
-
-    groups.get(target).push(saveType);
-  });
-
-  return groups;
 }
 
 // ─── Toast helper ─────────────────────────────────────────────────────────────
@@ -136,7 +105,7 @@ function injectButton() {
   // Build quality picker
   const picker = document.createElement('div');
   picker.id = 'ytdl-picker';
-  groupedSaveTypes().forEach((items, target) => {
+  groupedSaveTypes(saveTypes).forEach((items, target) => {
     const section = document.createElement('div');
     section.className = 'ytdl-pick-section';
 

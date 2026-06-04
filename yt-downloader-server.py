@@ -21,7 +21,6 @@ import shlex
 import shutil
 import threading
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -81,8 +80,6 @@ SAVE_TYPES = [
     save_type('MP3 to Podcast', 'audio', '◉', 'podcast', 'mp3'),
     save_type('M4A to Podcast', 'audio', '◉', 'podcast', 'm4a'),
     save_type('M4B Audiobook', 'audio', '▣', 'audiobook', 'm4b'),
-    save_type('M4B Audiobook 10% chapters', 'audio', '▣', 'audiobook', 'm4b', 10),
-    save_type('M4B Audiobook 20% chapters', 'audio', '▣', 'audiobook', 'm4b', 20),
     save_type('M4A to Audiobooks', 'audio', '▣', 'audiobook', 'm4a'),
 ]
 
@@ -277,7 +274,7 @@ def build_ytdlp_command(url, quality, audio_format=None, target='video'):
     cmd.append(url)
     return cmd
 
-def run_download(url, quality, audio_format=None, target='video', chapter_percent=None):
+def run_download(url, quality, audio_format=None, target='video'):
 
     with lock:
         active[url] = {'status': 'downloading', 'title': ''}
@@ -292,7 +289,7 @@ def run_download(url, quality, audio_format=None, target='video', chapter_percen
 
         if result.returncode == 0:
             if quality == 'audio' and audio_format == 'm4b':
-                finalize_m4b(archive_directory_for_target(target), started_at, chapter_percent)
+                finalize_m4b(archive_directory_for_target(target), started_at)
             with lock:
                 active[url] = {'status': 'done', 'title': title, 'target': target}
             print(f'[✓] Downloaded: {title}')
@@ -319,92 +316,13 @@ def find_newest_m4a(archive_dir, started_at):
             candidates.append((modified_at, path))
     return max(candidates, default=(None, None))[1]
 
-def read_duration(media_path):
-    info_path = Path(media_path).with_suffix('.info.json')
-    if not info_path.exists():
-        return 0
-    try:
-        with info_path.open('r', encoding='utf-8') as handle:
-            return float(json.load(handle).get('duration') or 0)
-    except (OSError, TypeError, ValueError):
-        return 0
-
-def escape_metadata(value):
-    return (
-        value
-        .replace('\\', '\\\\')
-        .replace('=', '\\=')
-        .replace(';', '\\;')
-        .replace('#', '\\#')
-        .replace('\n', '\\\n')
-    )
-
-def build_chapter_metadata(media_path, chapter_percent):
-    duration = read_duration(media_path)
-    lines = [';FFMETADATA1', f'title={escape_metadata(Path(media_path).stem)}']
-    if duration <= 0:
-        return '\n'.join(lines)
-
-    chapter_count = 100 // chapter_percent
-    duration_ms = int(duration * 1000)
-    for index in range(chapter_count):
-        start = duration_ms * index // chapter_count
-        end = duration_ms if index == chapter_count - 1 else duration_ms * (index + 1) // chapter_count
-        lines.extend([
-            '[CHAPTER]',
-            'TIMEBASE=1/1000',
-            f'START={start}',
-            f'END={end}',
-            f'title={chapter_percent * index}%',
-        ])
-    return '\n'.join(lines)
-
-def find_ffmpeg():
-    jellyfin_ffmpeg = os.environ.get('JELLYFIN_FFMPEG_PATH', '')
-    if jellyfin_ffmpeg and Path(jellyfin_ffmpeg).exists():
-        return jellyfin_ffmpeg
-    return shutil.which('ffmpeg') or 'ffmpeg'
-
-def finalize_m4b(archive_dir, started_at, chapter_percent=None):
+def finalize_m4b(archive_dir, started_at):
     source = find_newest_m4a(archive_dir, started_at)
     if not source:
         print('WARNING: could not find extracted m4a to finalize as m4b')
         return
 
-    destination = source.with_suffix('.m4b')
-    if chapter_percent is None:
-        source.replace(destination)
-        return
-
-    metadata_path = None
-    temp_path = source.with_name(f'{source.stem}.tmp.m4b')
-    try:
-        with tempfile.NamedTemporaryFile('w', suffix='.ffmetadata', delete=False, encoding='utf-8') as handle:
-            metadata_path = Path(handle.name)
-            handle.write(build_chapter_metadata(source, chapter_percent))
-
-        result = subprocess.run([
-            find_ffmpeg(),
-            '-y',
-            '-i', str(source),
-            '-i', str(metadata_path),
-            '-map_metadata', '1',
-            '-codec', 'copy',
-            str(temp_path),
-        ], capture_output=True, text=True)
-        if result.returncode == 0:
-            temp_path.replace(destination)
-            source.unlink(missing_ok=True)
-        else:
-            print(f'WARNING: could not add m4b chapters: {result.stderr.strip()}')
-            source.replace(destination)
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f'WARNING: could not add m4b chapters: {exc}')
-        source.replace(destination)
-    finally:
-        if metadata_path:
-            metadata_path.unlink(missing_ok=True)
-        temp_path.unlink(missing_ok=True)
+    source.replace(source.with_suffix('.m4b'))
 
 def parse_download_payload(handler):
     length = int(handler.headers.get('Content-Length', 0))
@@ -570,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         # Start download in background thread
-        t = threading.Thread(target=run_download, args=(url, quality, audio_format, target, chapter_percent), daemon=True)
+        t = threading.Thread(target=run_download, args=(url, quality, audio_format, target), daemon=True)
         t.start()
 
         label = f'{quality}/{audio_format}' if quality == 'audio' and audio_format else quality
