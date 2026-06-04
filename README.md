@@ -151,6 +151,18 @@ Current save targets include video downloads at best, 1080p, 720p, or 480p;
 music and podcast audio as MP3, M4A, or Opus; and audiobook saves as M4A or M4B
 with optional rough 10% or 20% chapter breaks.
 
+## Jellyfin Plugin Repository
+
+Use this repository manifest URL in Jellyfin's plugin repository settings:
+
+```text
+https://raw.githubusercontent.com/stephenhoos/jellyfin-ytdl/main/manifest.json
+```
+
+The repository manifest points Jellyfin at published GitHub release zips. The
+`meta.json` file inside the plugin package is still copied from
+`packaging/YtdlArchive/meta.json` during `build_plugin.sh`.
+
 ## Security Notes
 
 - The downloader API requires the Browser API token for localhost and LAN
