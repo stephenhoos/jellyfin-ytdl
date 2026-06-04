@@ -1,20 +1,11 @@
 'use strict';
 
 const {
+  DEFAULT_SAVE_TYPES,
   apiFetch
 } = globalThis.YtdlArchiveCommon;
 let injected = false;
-let saveTypes = [
-  { label: 'Best to Other', quality: 'best', icon: '★', target: 'other' },
-  { label: '1080p to Other', quality: '1080', icon: 'HD', target: 'other' },
-  { label: '720p to Other', quality: '720', icon: 'HD', target: 'other' },
-  { label: '480p to Other', quality: '480', icon: 'SD', target: 'other' },
-  { label: 'MP3 to Music', quality: 'audio', icon: '♫', audioFormat: 'mp3', target: 'music' },
-  { label: 'M4A to Music', quality: 'audio', icon: '♫', audioFormat: 'm4a', target: 'music' },
-  { label: 'Opus to Music', quality: 'audio', icon: '♫', audioFormat: 'opus', target: 'music' },
-  { label: 'M4B Audiobook', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook' },
-  { label: 'M4B Audiobook 10% chapters', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 10 }
-];
+let saveTypes = DEFAULT_SAVE_TYPES;
 let saveTypesLoadPromise = null;
 
 function loadSaveTypes() {

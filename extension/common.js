@@ -2,6 +2,21 @@
 
 (function initializeYtdlArchiveCommon(globalScope) {
   const DEFAULT_SERVER = 'http://localhost:9876';
+  const DEFAULT_SAVE_TYPES = [
+    { label: 'Best to Other', quality: 'best', icon: '★', target: 'other' },
+    { label: '1080p to Other', quality: '1080', icon: 'HD', target: 'other' },
+    { label: '720p to Other', quality: '720', icon: 'HD', target: 'other' },
+    { label: '480p to Other', quality: '480', icon: 'SD', target: 'other' },
+    { label: 'MP3 to Music', quality: 'audio', icon: '♫', audioFormat: 'mp3', target: 'music' },
+    { label: 'M4A to Music', quality: 'audio', icon: '♫', audioFormat: 'm4a', target: 'music' },
+    { label: 'Opus to Music', quality: 'audio', icon: '♫', audioFormat: 'opus', target: 'music' },
+    { label: 'MP3 to Podcast', quality: 'audio', icon: '◉', audioFormat: 'mp3', target: 'podcast' },
+    { label: 'M4A to Podcast', quality: 'audio', icon: '◉', audioFormat: 'm4a', target: 'podcast' },
+    { label: 'M4B Audiobook', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook' },
+    { label: 'M4B Audiobook 10% chapters', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 10 },
+    { label: 'M4B Audiobook 20% chapters', quality: 'audio', icon: '▣', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 20 },
+    { label: 'M4A to Audiobooks', quality: 'audio', icon: '▣', audioFormat: 'm4a', target: 'audiobook' }
+  ];
 
   function storageGet(defaults) {
     return new Promise((resolve) => {
@@ -114,6 +129,7 @@
 
   globalScope.YtdlArchiveCommon = {
     DEFAULT_SERVER,
+    DEFAULT_SAVE_TYPES,
     apiFetch,
     browserApiToken,
     fetchBrowserApiToken,

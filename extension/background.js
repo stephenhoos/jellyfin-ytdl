@@ -5,6 +5,7 @@ if (typeof importScripts === 'function' && !globalThis.YtdlArchiveCommon) {
 }
 
 const {
+  DEFAULT_SAVE_TYPES,
   DEFAULT_SERVER,
   normalizeServerUrl,
   storageGet,
@@ -15,21 +16,6 @@ let contextMenuSaveTypes = [];
 
 const CONTEXT_MENU_ROOT_ID = 'ytdlArchive.sendLink';
 const CONTEXT_MENU_CONTEXTS = ['link', 'page', 'video', 'audio'];
-const DEFAULT_SAVE_TYPES = [
-  { label: 'Best to Other', quality: 'best', target: 'other' },
-  { label: '1080p to Other', quality: '1080', target: 'other' },
-  { label: '720p to Other', quality: '720', target: 'other' },
-  { label: '480p to Other', quality: '480', target: 'other' },
-  { label: 'MP3 to Music', quality: 'audio', audioFormat: 'mp3', target: 'music' },
-  { label: 'M4A to Music', quality: 'audio', audioFormat: 'm4a', target: 'music' },
-  { label: 'Opus to Music', quality: 'audio', audioFormat: 'opus', target: 'music' },
-  { label: 'MP3 to Podcast', quality: 'audio', audioFormat: 'mp3', target: 'podcast' },
-  { label: 'M4A to Podcast', quality: 'audio', audioFormat: 'm4a', target: 'podcast' },
-  { label: 'M4B Audiobook', quality: 'audio', audioFormat: 'm4b', target: 'audiobook' },
-  { label: 'M4B Audiobook 10% chapters', quality: 'audio', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 10 },
-  { label: 'M4B Audiobook 20% chapters', quality: 'audio', audioFormat: 'm4b', target: 'audiobook', chapterPercent: 20 },
-  { label: 'M4A to Audiobooks', quality: 'audio', audioFormat: 'm4a', target: 'audiobook' }
-];
 
 function isLocalServerUrl(serverUrl) {
   try {
@@ -181,7 +167,10 @@ async function loadSaveTypesForMenu() {
 
 function contextMenuCreate(options) {
   chrome.contextMenus.create(options, () => {
-    void chrome.runtime.lastError;
+    const error = chrome.runtime.lastError;
+    if (error) {
+      console.warn('YtdlArchive could not create a context menu item.', error);
+    }
   });
 }
 
@@ -225,7 +214,7 @@ function contextMenuUrl(info, tab) {
 }
 
 async function queueContextMenuDownload(info, tab) {
-  const match = String(info.menuItemId || '').match(/\.type\.(\d+)$/);
+  const match = /\.type\.(\d+)$/.exec(String(info.menuItemId || ''));
   if (!match) {
     return;
   }
@@ -258,15 +247,23 @@ async function queueContextMenuDownload(info, tab) {
 
 if (chrome.contextMenus) {
   chrome.runtime.onInstalled?.addListener(() => {
-    void rebuildContextMenus();
+    rebuildContextMenus().catch((error) => {
+      console.warn('YtdlArchive could not rebuild context menus.', error);
+    });
   });
   chrome.runtime.onStartup?.addListener(() => {
-    void rebuildContextMenus();
+    rebuildContextMenus().catch((error) => {
+      console.warn('YtdlArchive could not rebuild context menus.', error);
+    });
   });
   chrome.contextMenus.onClicked.addListener((info, tab) => {
-    void queueContextMenuDownload(info, tab);
+    queueContextMenuDownload(info, tab).catch((error) => {
+      console.warn('YtdlArchive context menu download failed.', error);
+    });
   });
-  void rebuildContextMenus();
+  rebuildContextMenus().catch((error) => {
+    console.warn('YtdlArchive could not rebuild context menus.', error);
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

@@ -302,7 +302,7 @@ def read_duration(media_path):
     try:
         with info_path.open('r', encoding='utf-8') as handle:
             return float(json.load(handle).get('duration') or 0)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, TypeError, ValueError):
         return 0
 
 def escape_metadata(value):
@@ -381,6 +381,55 @@ def finalize_m4b(archive_dir, started_at, chapter_percent=None):
         if metadata_path:
             metadata_path.unlink(missing_ok=True)
         temp_path.unlink(missing_ok=True)
+
+def parse_download_payload(handler):
+    length = int(handler.headers.get('Content-Length', 0))
+    body = handler.rfile.read(length)
+    try:
+        data = json.loads(body)
+    except Exception:
+        return None, 'Bad JSON'
+
+    url = data.get('url', '').strip()
+    quality = data.get('quality', 'best')
+    audio_format = data.get('audioFormat')
+    target = normalize_target(data.get('target', 'other'))
+    chapter_percent = data.get('chapterPercent')
+    return {
+        'url': url,
+        'quality': quality,
+        'audio_format': audio_format,
+        'target': target,
+        'chapter_percent': chapter_percent,
+    }, None
+
+def validate_download_request(request_data):
+    url = request_data['url']
+    quality = request_data['quality']
+    audio_format = request_data['audio_format']
+    target = request_data['target']
+    chapter_percent = request_data['chapter_percent']
+
+    if not url:
+        return 'Missing url'
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {'http', 'https'} or parsed.hostname not in ALLOWED_DOWNLOAD_HOSTS:
+        return 'Only YouTube URLs are allowed by default'
+
+    if quality not in QUALITY_FORMATS:
+        return f'Unsupported quality: {quality}'
+
+    if quality == 'audio' and audio_format and audio_format not in SUPPORTED_AUDIO_FORMATS:
+        return f'Unsupported audio format: {audio_format}'
+
+    if not target:
+        return f'Unsupported target: {target}'
+
+    if chapter_percent is not None and chapter_percent not in {10, 20}:
+        return 'chapterPercent must be 10 or 20'
+
+    return None
 
 # ─── HTTP handler ─────────────────────────────────────────────────────────────
 
@@ -482,44 +531,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {'error': 'Not found'})
             return
 
-        length = int(self.headers.get('Content-Length', 0))
-        body   = self.rfile.read(length)
-        try:
-            data = json.loads(body)
-        except Exception:
-            self.send_json(400, {'error': 'Bad JSON'})
+        request_data, parse_error = parse_download_payload(self)
+        if parse_error:
+            self.send_json(400, {'error': parse_error})
             return
 
-        url     = data.get('url', '').strip()
-        quality = data.get('quality', 'best')
-        audio_format = data.get('audioFormat')
-        target = normalize_target(data.get('target', 'other'))
-        chapter_percent = data.get('chapterPercent')
-
-        if not url:
-            self.send_json(400, {'error': 'Missing url'})
+        validation_error = validate_download_request(request_data)
+        if validation_error:
+            self.send_json(400, {'error': validation_error})
             return
 
-        parsed = urlparse(url)
-        if parsed.scheme not in {'http', 'https'} or parsed.hostname not in ALLOWED_DOWNLOAD_HOSTS:
-            self.send_json(400, {'error': 'Only YouTube URLs are allowed by default'})
-            return
-
-        if quality not in QUALITY_FORMATS:
-            self.send_json(400, {'error': f'Unsupported quality: {quality}'})
-            return
-
-        if quality == 'audio' and audio_format and audio_format not in SUPPORTED_AUDIO_FORMATS:
-            self.send_json(400, {'error': f'Unsupported audio format: {audio_format}'})
-            return
-
-        if not target:
-            self.send_json(400, {'error': f'Unsupported target: {target}'})
-            return
-
-        if chapter_percent is not None and chapter_percent not in {10, 20}:
-            self.send_json(400, {'error': 'chapterPercent must be 10 or 20'})
-            return
+        url = request_data['url']
+        quality = request_data['quality']
+        audio_format = request_data['audio_format']
+        target = request_data['target']
+        chapter_percent = request_data['chapter_percent']
 
         if not YTDLP:
             self.send_json(500, {

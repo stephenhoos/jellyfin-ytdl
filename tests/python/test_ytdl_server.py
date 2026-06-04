@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from http import HTTPStatus
 from pathlib import Path
@@ -30,6 +31,19 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual("mp3", command[command.index("--audio-format") + 1])
         self.assertEqual("https://www.youtube.com/watch?v=dQw4w9WgXcQ", command[-1])
 
+    def test_audio_command_extracts_m4b_as_m4a_before_finalization(self):
+        server = load_server_module()
+
+        command = server.build_ytdlp_command(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "audio",
+            "m4b",
+            "audiobook",
+        )
+
+        self.assertEqual("m4a", command[command.index("--audio-format") + 1])
+        self.assertIn("--embed-metadata", command)
+
     def test_video_command_uses_merge_output_format(self):
         server = load_server_module()
 
@@ -55,6 +69,29 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual(server.JELLYFIN_PODCAST_LIBRARY_NAME, server.library_name_for_target("podcast"))
         self.assertEqual(server.JELLYFIN_AUDIOBOOK_LIBRARY_NAME, server.library_name_for_target("audiobook"))
         self.assertEqual(server.JELLYFIN_OTHER_LIBRARY_NAME, server.library_name_for_target("video"))
+        self.assertEqual("", server.normalize_target("unknown"))
+
+    def test_m4b_helpers_find_finalize_and_build_chapters(self):
+        server = load_server_module()
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_dir = Path(temp_root)
+            media_path = temp_dir / "A=B;C#D.m4a"
+            media_path.write_text("", encoding="utf-8")
+            media_path.with_suffix(".info.json").write_text('{"duration":100}', encoding="utf-8")
+
+            metadata = server.build_chapter_metadata(media_path, 20)
+
+            self.assertIn("title=A\\=B\\;C\\#D", metadata)
+            self.assertIn("START=0", metadata)
+            self.assertIn("END=20000", metadata)
+            self.assertIn("title=80%", metadata)
+            self.assertEqual(media_path, server.find_newest_m4a(temp_dir, 0))
+
+            server.finalize_m4b(temp_dir, 0)
+
+            self.assertFalse(media_path.exists())
+            self.assertTrue(media_path.with_suffix(".m4b").exists())
+
 
     def test_handler_requires_browser_token(self):
         server = load_server_module()
@@ -98,6 +135,7 @@ class YtdlServerTests(unittest.TestCase):
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "4k"}, "Unsupported quality"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "audio", "audioFormat": "wav"}, "Unsupported audio format"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "unknown"}, "Unsupported target"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "chapterPercent": 30}, "chapterPercent"),
         ]
 
         for payload, expected_error in cases:
