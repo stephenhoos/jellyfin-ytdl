@@ -261,9 +261,6 @@ if (chrome.contextMenus) {
       console.warn('YtdlArchive context menu download failed.', error);
     });
   });
-  rebuildContextMenus().catch((error) => {
-    console.warn('YtdlArchive could not rebuild context menus.', error);
-  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

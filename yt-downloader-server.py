@@ -62,6 +62,30 @@ QUALITY_FORMATS = {
 SUPPORTED_AUDIO_FORMATS = {'mp3', 'm4a', 'm4b', 'opus'}
 SUPPORTED_TARGETS = {'video', 'other', 'music', 'podcast', 'audiobook', 'book'}
 
+def save_type(label, quality, icon, target, audio_format=None, chapter_percent=None):
+    item = {'label': label, 'quality': quality, 'icon': icon, 'target': target}
+    if audio_format:
+        item['audioFormat'] = audio_format
+    if chapter_percent:
+        item['chapterPercent'] = chapter_percent
+    return item
+
+SAVE_TYPES = [
+    save_type('Best to Other', 'best', '★', 'other'),
+    save_type('1080p to Other', '1080', 'HD', 'other'),
+    save_type('720p to Other', '720', 'HD', 'other'),
+    save_type('480p to Other', '480', 'SD', 'other'),
+    save_type('MP3 to Music', 'audio', '♫', 'music', 'mp3'),
+    save_type('M4A to Music', 'audio', '♫', 'music', 'm4a'),
+    save_type('Opus to Music', 'audio', '♫', 'music', 'opus'),
+    save_type('MP3 to Podcast', 'audio', '◉', 'podcast', 'mp3'),
+    save_type('M4A to Podcast', 'audio', '◉', 'podcast', 'm4a'),
+    save_type('M4B Audiobook', 'audio', '▣', 'audiobook', 'm4b'),
+    save_type('M4B Audiobook 10% chapters', 'audio', '▣', 'audiobook', 'm4b', 10),
+    save_type('M4B Audiobook 20% chapters', 'audio', '▣', 'audiobook', 'm4b', 20),
+    save_type('M4A to Audiobooks', 'audio', '▣', 'audiobook', 'm4a'),
+]
+
 # Archive-friendly output for Jellyfin metadata plugins:
 #   Channel Name [UCxxxxxxxxxxxxxxxxxxxxxx]/
 #     2026-05-21 - Video Title [dQw4w9WgXcQ].mp4
@@ -502,21 +526,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             })
         elif self.path == '/save-types':
-            self.send_json(200, {'saveTypes': [
-                {'label': 'Best to Other', 'quality': 'best', 'icon': '★', 'target': 'other'},
-                {'label': '1080p to Other', 'quality': '1080', 'icon': 'HD', 'target': 'other'},
-                {'label': '720p to Other', 'quality': '720', 'icon': 'HD', 'target': 'other'},
-                {'label': '480p to Other', 'quality': '480', 'icon': 'SD', 'target': 'other'},
-                {'label': 'MP3 to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'mp3', 'target': 'music'},
-                {'label': 'M4A to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'm4a', 'target': 'music'},
-                {'label': 'Opus to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'opus', 'target': 'music'},
-                {'label': 'MP3 to Podcast', 'quality': 'audio', 'icon': '◉', 'audioFormat': 'mp3', 'target': 'podcast'},
-                {'label': 'M4A to Podcast', 'quality': 'audio', 'icon': '◉', 'audioFormat': 'm4a', 'target': 'podcast'},
-                {'label': 'M4B Audiobook', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook'},
-                {'label': 'M4B Audiobook 10% chapters', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook', 'chapterPercent': 10},
-                {'label': 'M4B Audiobook 20% chapters', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook', 'chapterPercent': 20},
-                {'label': 'M4A to Audiobooks', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4a', 'target': 'audiobook'},
-            ]})
+            self.send_json(200, {'saveTypes': SAVE_TYPES})
         elif self.path == '/status':
             with lock:
                 self.send_json(200, dict(active))

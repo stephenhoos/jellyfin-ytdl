@@ -968,10 +968,15 @@ test('background script creates context menu save type submenus and queues click
   const createdMenus = [];
   const downloads = [];
   let clickListener;
+  let installedListener;
   globalThis.chrome = {
     runtime: {
       lastError: null,
-      onInstalled: { addListener() {} },
+      onInstalled: {
+        addListener(callback) {
+          installedListener = callback;
+        }
+      },
       onStartup: { addListener() {} },
       onMessage: { addListener() {} }
     },
@@ -1028,7 +1033,8 @@ test('background script creates context menu save type submenus and queues click
   };
 
   await importFresh('./extension/background.js');
-  await flushAsync();
+  installedListener();
+  await flushAsync(40);
 
   const root = createdMenus.find(menu => menu.id === 'ytdlArchive.sendLink');
   const audiobookGroup = createdMenus.find(menu => menu.title === 'Audiobook');

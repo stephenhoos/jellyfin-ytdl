@@ -92,6 +92,42 @@ class YtdlServerTests(unittest.TestCase):
             self.assertFalse(media_path.exists())
             self.assertTrue(media_path.with_suffix(".m4b").exists())
 
+    def test_m4b_helpers_handle_missing_inputs(self):
+        server = load_server_module()
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_dir = Path(temp_root)
+
+            self.assertIsNone(server.find_newest_m4a(temp_dir, 0))
+            self.assertEqual(0, server.read_duration(temp_dir / "missing.m4a"))
+            server.finalize_m4b(temp_dir, 0)
+
+            media_path = temp_dir / "No Duration.m4a"
+            media_path.write_text("", encoding="utf-8")
+            metadata = server.build_chapter_metadata(media_path, 10)
+
+            self.assertIn("title=No Duration", metadata)
+            self.assertNotIn("[CHAPTER]", metadata)
+
+    def test_parse_and_validate_download_request_accepts_supported_targets(self):
+        server = load_server_module()
+        handler = make_handler(server, "POST", "/download", {
+            "url": "https://youtu.be/dQw4w9WgXcQ",
+            "quality": "audio",
+            "audioFormat": "m4b",
+            "target": "book",
+            "chapterPercent": 20,
+        }, token="secret")
+
+        request_data, error = server.parse_download_payload(handler)
+
+        self.assertIsNone(error)
+        self.assertEqual("audiobook", request_data["target"])
+        self.assertIsNone(server.validate_download_request(request_data))
+        self.assertEqual("chapterPercent must be 10 or 20", server.validate_download_request({
+            **request_data,
+            "chapter_percent": 30,
+        }))
+
 
     def test_handler_requires_browser_token(self):
         server = load_server_module()
