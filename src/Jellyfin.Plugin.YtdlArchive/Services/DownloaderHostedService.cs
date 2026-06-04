@@ -71,6 +71,7 @@ public sealed class DownloaderHostedService : BackgroundService
     private readonly ILogger<DownloaderHostedService> _logger;
     private readonly YtdlpManager _ytdlpManager;
     private readonly LibraryReconciler _libraryReconciler;
+    private readonly ChannelSubscriptionManager _subscriptions;
     private readonly ConcurrentDictionary<string, DownloadStatus> _active = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _libraryScanLock = new(1, 1);
     private readonly SemaphoreSlim _downloadLock;
@@ -81,11 +82,13 @@ public sealed class DownloaderHostedService : BackgroundService
     public DownloaderHostedService(
         ILogger<DownloaderHostedService> logger,
         YtdlpManager ytdlpManager,
-        LibraryReconciler libraryReconciler)
+        LibraryReconciler libraryReconciler,
+        ChannelSubscriptionManager subscriptions)
     {
         _logger = logger;
         _ytdlpManager = ytdlpManager;
         _libraryReconciler = libraryReconciler;
+        _subscriptions = subscriptions;
         _downloadLock = new SemaphoreSlim(Math.Clamp(Plugin.Instance?.Configuration.MaxConcurrentDownloads ?? 2, 1, 6));
     }
 
@@ -271,7 +274,19 @@ public sealed class DownloaderHostedService : BackgroundService
 
             if (IsRoute(method, path, "POST", "/download"))
             {
-                await QueueDownloadAsync(context, cancellationToken).ConfigureAwait(false);
+                await QueueDownloadFromRequestAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsRoute(method, path, "GET", "/subscriptions"))
+            {
+                await ListSubscriptionsAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsRoute(method, path, "POST", "/subscriptions"))
+            {
+                await SubscribeAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -371,7 +386,7 @@ public sealed class DownloaderHostedService : BackgroundService
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task QueueDownloadAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    private async Task QueueDownloadFromRequestAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
         using var body = await JsonDocument.ParseAsync(context.Request.InputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
         var root = body.RootElement;
@@ -387,59 +402,110 @@ public sealed class DownloaderHostedService : BackgroundService
             return;
         }
 
-        if (!IsAllowedDownloadUrl(url))
+        var result = await QueueDownloadAsync(
+            new DownloadQueueRequest(url, quality, audioFormat, target, chapterPercent),
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Error is not null)
         {
-            await SendJsonAsync(context.Response, 400, new { error = "Only YouTube URLs are allowed by default" }, cancellationToken).ConfigureAwait(false);
+            await SendJsonAsync(context.Response, result.Error.StartsWith("yt-dlp not found", StringComparison.Ordinal) ? 500 : 400, new { error = result.Error }, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        await SendJsonAsync(context.Response, 200, new
+        {
+            queued = result.Queued,
+            reason = result.Reason,
+            saveTo = result.SaveTo,
+            target = result.Target
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<DownloadQueueResult> QueueDownloadAsync(DownloadQueueRequest request, CancellationToken cancellationToken)
+    {
+        var url = request.Url.Trim();
+        var quality = string.IsNullOrWhiteSpace(request.Quality) ? "best" : request.Quality;
+        var audioFormat = request.AudioFormat;
+        var target = ArchiveSettings.NormalizeTarget(request.Target);
+        var chapterPercent = request.ChapterPercent;
+
+        if (!IsAllowedDownloadUrl(url))
+        {
+            return new DownloadQueueResult(false, null, "Only YouTube URLs are allowed by default", null, null);
+        }
+
+        _ytdlpPath ??= await _ytdlpManager.EnsureAsync(cancellationToken).ConfigureAwait(false);
         if (_ytdlpPath is null)
         {
-            await SendJsonAsync(context.Response, 500, new { error = "yt-dlp not found. Install it with: pip install yt-dlp" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "yt-dlp not found. Install it with: pip install yt-dlp", null, null);
         }
 
         if (!QualityFormats.ContainsKey(quality))
         {
-            await SendJsonAsync(context.Response, 400, new { error = $"Unsupported quality: {quality}" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, $"Unsupported quality: {quality}", null, null);
         }
 
         if (quality.Equals(AudioQuality, StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(audioFormat)
             && !SupportedAudioFormats.Contains(audioFormat))
         {
-            await SendJsonAsync(context.Response, 400, new { error = $"Unsupported audio format: {audioFormat}" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, $"Unsupported audio format: {audioFormat}", null, null);
         }
 
         if (target.Length == 0)
         {
-            await SendJsonAsync(context.Response, 400, new { error = "Unsupported target" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "Unsupported target", null, null);
         }
 
         if (chapterPercent is not null && chapterPercent is not (10 or 20))
         {
-            await SendJsonAsync(context.Response, 400, new { error = "chapterPercent must be 10 or 20" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "chapterPercent must be 10 or 20", null, null);
         }
 
         if (_active.TryGetValue(url, out var existing) && existing.Status is "downloading" or "queued")
         {
-            await SendJsonAsync(context.Response, 200, new { queued = false, reason = "already downloading" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, "already downloading", null, null, target);
         }
 
         _active[url] = new DownloadStatus("queued", string.Empty, null, target);
         _ = Task.Run(() => RunDownloadAsync(url, quality, audioFormat, target, chapterPercent, CancellationToken.None), CancellationToken.None);
 
+        return new DownloadQueueResult(true, null, null, ArchiveDirectoryForTarget(target), target);
+    }
+
+    private async Task ListSubscriptionsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var subscriptions = await _subscriptions.ListAsync(cancellationToken).ConfigureAwait(false);
         await SendJsonAsync(context.Response, 200, new
         {
-            queued = true,
-            saveTo = ArchiveDirectoryForTarget(target),
-            target
+            subscriptions,
+            storePath = _subscriptions.CurrentStorePath,
+            legacyStorePath = _subscriptions.CurrentLegacyStorePath
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SubscribeAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var request = await JsonSerializer.DeserializeAsync<SubscriptionRequest>(context.Request.InputStream, WebJsonOptions, cancellationToken).ConfigureAwait(false);
+        if (request is null)
+        {
+            await SendJsonAsync(context.Response, 400, new { error = "Invalid subscription request" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            var subscription = await _subscriptions.SubscribeAsync(request, cancellationToken).ConfigureAwait(false);
+            await SendJsonAsync(context.Response, 200, new { subscribed = true, subscription }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex)
+        {
+            await SendJsonAsync(context.Response, 400, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await SendJsonAsync(context.Response, 500, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task RunDownloadAsync(string url, string quality, string? audioFormat, string target, int? chapterPercent, CancellationToken cancellationToken)
