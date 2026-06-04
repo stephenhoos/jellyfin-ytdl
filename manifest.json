@@ -1,0 +1,20 @@
+[
+  {
+    "guid": "499ef0fc-f2b9-4469-aac1-bee74c3b1cfd",
+    "name": "YtdlArchive",
+    "description": "Save YouTube videos, music, podcasts, and audiobooks into Jellyfin libraries with yt-dlp sidecar metadata.",
+    "overview": "YouTube downloader and archive metadata for Jellyfin",
+    "owner": "Stephen Hoos",
+    "category": "Metadata",
+    "versions": [
+      {
+        "version": "0.0.0.1",
+        "changelog": "Initial public beta for saving YouTube downloads into Jellyfin libraries.",
+        "targetAbi": "10.11.6.0",
+        "sourceUrl": "https://github.com/stephenhoos/jellyfin-ytdl/releases/download/v0.0.0.1-beta/YtdlArchive-0.0.0.1.zip",
+        "checksum": "a8691b332002420dff502026455e244e",
+        "timestamp": "2026-05-22T05:46:31Z"
+      }
+    ]
+  }
+]

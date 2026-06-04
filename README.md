@@ -116,7 +116,9 @@ library and scan.
 Then paste the Browser API token from the Jellyfin plugin settings into the
 extension popup. Open a YouTube video and use the red `DOWNLOAD` button in the
 player. The picker fetches its save types from the Jellyfin plugin, so plugin
-updates can change the Chrome menu without editing the extension.
+updates can change the Chrome menu without editing the extension. You can also
+right-click a YouTube link or page and choose `Send link to ytdl`, then pick a
+Video, Music, Podcast, or Audiobook save type from the submenu.
 
 For another computer on the LAN, enable "Allow Chrome extensions on my LAN to
 use this downloader", set the Chrome extension server URL to the Jellyfin
@@ -148,6 +150,18 @@ Browser API token in Jellyfin.
 Current save targets include video downloads at best, 1080p, 720p, or 480p;
 music and podcast audio as MP3, M4A, or Opus; and audiobook saves as M4A or M4B
 with optional rough 10% or 20% chapter breaks.
+
+## Jellyfin Plugin Repository
+
+Use this repository manifest URL in Jellyfin's plugin repository settings:
+
+```text
+https://raw.githubusercontent.com/stephenhoos/jellyfin-ytdl/main/manifest.json
+```
+
+The repository manifest points Jellyfin at published GitHub release zips. The
+`meta.json` file inside the plugin package is still copied from
+`packaging/YtdlArchive/meta.json` during `build_plugin.sh`.
 
 ## Security Notes
 

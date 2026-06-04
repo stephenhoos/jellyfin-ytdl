@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from http import HTTPStatus
 from pathlib import Path
@@ -30,6 +31,19 @@ class YtdlServerTests(unittest.TestCase):
         self.assertEqual("mp3", command[command.index("--audio-format") + 1])
         self.assertEqual("https://www.youtube.com/watch?v=dQw4w9WgXcQ", command[-1])
 
+    def test_audio_command_extracts_m4b_as_m4a_before_finalization(self):
+        server = load_server_module()
+
+        command = server.build_ytdlp_command(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "audio",
+            "m4b",
+            "audiobook",
+        )
+
+        self.assertEqual("m4a", command[command.index("--audio-format") + 1])
+        self.assertIn("--embed-metadata", command)
+
     def test_video_command_uses_merge_output_format(self):
         server = load_server_module()
 
@@ -48,9 +62,58 @@ class YtdlServerTests(unittest.TestCase):
         server = load_server_module()
 
         self.assertEqual(server.MUSIC_DOWNLOAD_DIR, server.archive_directory_for_target("music"))
-        self.assertEqual(server.DOWNLOAD_DIR, server.archive_directory_for_target("video"))
+        self.assertEqual(server.PODCAST_DOWNLOAD_DIR, server.archive_directory_for_target("podcast"))
+        self.assertEqual(server.AUDIOBOOK_DOWNLOAD_DIR, server.archive_directory_for_target("book"))
+        self.assertEqual(server.OTHER_DOWNLOAD_DIR, server.archive_directory_for_target("video"))
         self.assertEqual(server.JELLYFIN_MUSIC_LIBRARY_NAME, server.library_name_for_target("music"))
-        self.assertEqual(server.JELLYFIN_LIBRARY_NAME, server.library_name_for_target("video"))
+        self.assertEqual(server.JELLYFIN_PODCAST_LIBRARY_NAME, server.library_name_for_target("podcast"))
+        self.assertEqual(server.JELLYFIN_AUDIOBOOK_LIBRARY_NAME, server.library_name_for_target("audiobook"))
+        self.assertEqual(server.JELLYFIN_OTHER_LIBRARY_NAME, server.library_name_for_target("video"))
+        self.assertEqual("", server.normalize_target("unknown"))
+
+    def test_m4b_helpers_find_and_finalize_downloads(self):
+        server = load_server_module()
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_dir = Path(temp_root)
+            media_path = temp_dir / "Audiobook.m4a"
+            media_path.write_text("", encoding="utf-8")
+            media_path.with_suffix(".info.json").write_text('{"duration":100}', encoding="utf-8")
+
+            self.assertEqual(media_path, server.find_newest_m4a(temp_dir, 0))
+
+            server.finalize_m4b(temp_dir, 0)
+
+            self.assertFalse(media_path.exists())
+            self.assertTrue(media_path.with_suffix(".m4b").exists())
+
+    def test_m4b_helpers_handle_missing_inputs(self):
+        server = load_server_module()
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_dir = Path(temp_root)
+
+            self.assertIsNone(server.find_newest_m4a(temp_dir, 0))
+            server.finalize_m4b(temp_dir, 0)
+
+    def test_parse_and_validate_download_request_accepts_supported_targets(self):
+        server = load_server_module()
+        handler = make_handler(server, "POST", "/download", {
+            "url": "https://youtu.be/dQw4w9WgXcQ",
+            "quality": "audio",
+            "audioFormat": "m4b",
+            "target": "book",
+            "chapterPercent": 20,
+        }, token="secret")
+
+        request_data, error = server.parse_download_payload(handler)
+
+        self.assertIsNone(error)
+        self.assertEqual("audiobook", request_data["target"])
+        self.assertIsNone(server.validate_download_request(request_data))
+        self.assertEqual("chapterPercent must be 10 or 20", server.validate_download_request({
+            **request_data,
+            "chapter_percent": 30,
+        }))
+
 
     def test_handler_requires_browser_token(self):
         server = load_server_module()
@@ -76,7 +139,8 @@ class YtdlServerTests(unittest.TestCase):
         save_types = make_handler(server, "GET", "/save-types", token="secret")
         save_types.do_GET()
         self.assertEqual(HTTPStatus.OK, save_types.status)
-        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 3)
+        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 11)
+        self.assertIn("audiobook", {save_type["target"] for save_type in save_types.json_body["saveTypes"]})
 
         status = make_handler(server, "GET", "/status", token="secret")
         status.do_GET()
@@ -92,7 +156,8 @@ class YtdlServerTests(unittest.TestCase):
             ({"url": "https://example.com/watch?v=dQw4w9WgXcQ"}, "Only YouTube URLs"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "4k"}, "Unsupported quality"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "audio", "audioFormat": "wav"}, "Unsupported audio format"),
-            ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "podcast"}, "Unsupported target"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "unknown"}, "Unsupported target"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "chapterPercent": 30}, "chapterPercent"),
         ]
 
         for payload, expected_error in cases:
