@@ -48,9 +48,13 @@ class YtdlServerTests(unittest.TestCase):
         server = load_server_module()
 
         self.assertEqual(server.MUSIC_DOWNLOAD_DIR, server.archive_directory_for_target("music"))
-        self.assertEqual(server.DOWNLOAD_DIR, server.archive_directory_for_target("video"))
+        self.assertEqual(server.PODCAST_DOWNLOAD_DIR, server.archive_directory_for_target("podcast"))
+        self.assertEqual(server.AUDIOBOOK_DOWNLOAD_DIR, server.archive_directory_for_target("book"))
+        self.assertEqual(server.OTHER_DOWNLOAD_DIR, server.archive_directory_for_target("video"))
         self.assertEqual(server.JELLYFIN_MUSIC_LIBRARY_NAME, server.library_name_for_target("music"))
-        self.assertEqual(server.JELLYFIN_LIBRARY_NAME, server.library_name_for_target("video"))
+        self.assertEqual(server.JELLYFIN_PODCAST_LIBRARY_NAME, server.library_name_for_target("podcast"))
+        self.assertEqual(server.JELLYFIN_AUDIOBOOK_LIBRARY_NAME, server.library_name_for_target("audiobook"))
+        self.assertEqual(server.JELLYFIN_OTHER_LIBRARY_NAME, server.library_name_for_target("video"))
 
     def test_handler_requires_browser_token(self):
         server = load_server_module()
@@ -76,7 +80,8 @@ class YtdlServerTests(unittest.TestCase):
         save_types = make_handler(server, "GET", "/save-types", token="secret")
         save_types.do_GET()
         self.assertEqual(HTTPStatus.OK, save_types.status)
-        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 3)
+        self.assertGreaterEqual(len(save_types.json_body["saveTypes"]), 13)
+        self.assertIn("audiobook", {save_type["target"] for save_type in save_types.json_body["saveTypes"]})
 
         status = make_handler(server, "GET", "/status", token="secret")
         status.do_GET()
@@ -92,7 +97,7 @@ class YtdlServerTests(unittest.TestCase):
             ({"url": "https://example.com/watch?v=dQw4w9WgXcQ"}, "Only YouTube URLs"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "4k"}, "Unsupported quality"),
             ({"url": "https://youtu.be/dQw4w9WgXcQ", "quality": "audio", "audioFormat": "wav"}, "Unsupported audio format"),
-            ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "podcast"}, "Unsupported target"),
+            ({"url": "https://youtu.be/dQw4w9WgXcQ", "target": "unknown"}, "Unsupported target"),
         ]
 
         for payload, expected_error in cases:

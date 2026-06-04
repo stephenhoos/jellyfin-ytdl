@@ -18,8 +18,11 @@ import sys
 import json
 import secrets
 import shlex
+import shutil
 import threading
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib import parse, request, error
@@ -31,6 +34,9 @@ PORT        = 9876
 JSON_CONTENT_TYPE = 'application/json'
 DOWNLOAD_DIR = Path(os.environ.get('YTDL_DOWNLOAD_DIR', Path.home() / 'Downloads' / 'YouTube')).expanduser()
 MUSIC_DOWNLOAD_DIR = Path(os.environ.get('YTDL_MUSIC_DOWNLOAD_DIR', Path.home() / 'Music' / 'YouTube Music')).expanduser()
+PODCAST_DOWNLOAD_DIR = Path(os.environ.get('YTDL_PODCAST_DOWNLOAD_DIR', Path.home() / 'Music' / 'YT-Podcast')).expanduser()
+AUDIOBOOK_DOWNLOAD_DIR = Path(os.environ.get('YTDL_AUDIOBOOK_DOWNLOAD_DIR', Path.home() / 'Music' / 'YT-Audiobooks')).expanduser()
+OTHER_DOWNLOAD_DIR = Path(os.environ.get('YTDL_OTHER_DOWNLOAD_DIR', Path.home() / 'Downloads' / 'YT-Other')).expanduser()
 
 JELLYFIN_URL = os.environ.get('JELLYFIN_URL', '').strip().rstrip('/')
 JELLYFIN_API_KEY = os.environ.get('JELLYFIN_API_KEY', '').strip()
@@ -38,6 +44,9 @@ JELLYFIN_LIBRARY_NAME = os.environ.get('JELLYFIN_LIBRARY_NAME', 'YouTube').strip
 JELLYFIN_LIBRARY_TYPE = os.environ.get('JELLYFIN_LIBRARY_TYPE', 'tvshows').strip()
 JELLYFIN_MUSIC_LIBRARY_NAME = os.environ.get('JELLYFIN_MUSIC_LIBRARY_NAME', 'YouTube Music').strip()
 JELLYFIN_MUSIC_LIBRARY_TYPE = os.environ.get('JELLYFIN_MUSIC_LIBRARY_TYPE', 'music').strip()
+JELLYFIN_PODCAST_LIBRARY_NAME = os.environ.get('JELLYFIN_PODCAST_LIBRARY_NAME', 'YT-Podcast').strip()
+JELLYFIN_AUDIOBOOK_LIBRARY_NAME = os.environ.get('JELLYFIN_AUDIOBOOK_LIBRARY_NAME', 'YT-Audiobooks').strip()
+JELLYFIN_OTHER_LIBRARY_NAME = os.environ.get('JELLYFIN_OTHER_LIBRARY_NAME', 'YT-Other').strip()
 BROWSER_API_TOKEN = os.environ.get('YTDL_BROWSER_API_TOKEN', '').strip()
 ALLOWED_DOWNLOAD_HOSTS = {'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'}
 
@@ -50,7 +59,8 @@ QUALITY_FORMATS = {
     '480': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
     'audio': 'bestaudio/best',
 }
-SUPPORTED_AUDIO_FORMATS = {'mp3', 'm4a', 'opus'}
+SUPPORTED_AUDIO_FORMATS = {'mp3', 'm4a', 'm4b', 'opus'}
+SUPPORTED_TARGETS = {'video', 'other', 'music', 'podcast', 'audiobook', 'book'}
 
 # Archive-friendly output for Jellyfin metadata plugins:
 #   Channel Name [UCxxxxxxxxxxxxxxxxxxxxxx]/
@@ -66,6 +76,9 @@ OUTPUT_TEMPLATE = (
 
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MUSIC_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+PODCAST_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+AUDIOBOOK_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OTHER_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Active downloads tracker ────────────────────────────────────────────────
 
@@ -76,7 +89,6 @@ lock   = threading.Lock()
 
 def find_ytdlp():
     """Return the yt-dlp executable path, or None if not found."""
-    import shutil
     # 1. Try PATH
     found = shutil.which('yt-dlp')
     if found:
@@ -181,10 +193,36 @@ def refresh_jellyfin_library(name):
 # ─── Download worker ──────────────────────────────────────────────────────────
 
 def archive_directory_for_target(target):
-    return MUSIC_DOWNLOAD_DIR if target == 'music' else DOWNLOAD_DIR
+    target = normalize_target(target)
+    if target == 'music':
+        return MUSIC_DOWNLOAD_DIR
+    if target == 'podcast':
+        return PODCAST_DOWNLOAD_DIR
+    if target == 'audiobook':
+        return AUDIOBOOK_DOWNLOAD_DIR
+    if target == 'other':
+        return OTHER_DOWNLOAD_DIR
+    return DOWNLOAD_DIR
 
 def library_name_for_target(target):
-    return JELLYFIN_MUSIC_LIBRARY_NAME if target == 'music' else JELLYFIN_LIBRARY_NAME
+    target = normalize_target(target)
+    if target == 'music':
+        return JELLYFIN_MUSIC_LIBRARY_NAME
+    if target == 'podcast':
+        return JELLYFIN_PODCAST_LIBRARY_NAME
+    if target == 'audiobook':
+        return JELLYFIN_AUDIOBOOK_LIBRARY_NAME
+    if target == 'other':
+        return JELLYFIN_OTHER_LIBRARY_NAME
+    return JELLYFIN_LIBRARY_NAME
+
+def normalize_target(target):
+    target = (target or 'other').strip().lower()
+    if target == 'book':
+        return 'audiobook'
+    if target == 'video':
+        return 'other'
+    return target if target in SUPPORTED_TARGETS else ''
 
 def build_ytdlp_command(url, quality, audio_format=None, target='video'):
     fmt = QUALITY_FORMATS.get(quality, FORMAT)
@@ -201,11 +239,13 @@ def build_ytdlp_command(url, quality, audio_format=None, target='video'):
     ]
 
     if quality == 'audio':
+        audio_format = 'm4a' if audio_format == 'm4b' else audio_format
         audio_format = audio_format if audio_format in SUPPORTED_AUDIO_FORMATS else 'mp3'
         cmd += [
             '--extract-audio',
             '--audio-format', audio_format,
             '--audio-quality', '0',
+            '--embed-metadata',
         ]
     else:
         cmd += ['--merge-output-format', 'mp4']
@@ -213,12 +253,13 @@ def build_ytdlp_command(url, quality, audio_format=None, target='video'):
     cmd.append(url)
     return cmd
 
-def run_download(url, quality, audio_format=None, target='video'):
+def run_download(url, quality, audio_format=None, target='video', chapter_percent=None):
 
     with lock:
         active[url] = {'status': 'downloading', 'title': ''}
 
     try:
+        started_at = time.time()
         cmd = build_ytdlp_command(url, quality, audio_format, target)
 
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -226,6 +267,8 @@ def run_download(url, quality, audio_format=None, target='video'):
         title = result.stdout.strip().split('\n')[0] if result.stdout.strip() else url
 
         if result.returncode == 0:
+            if quality == 'audio' and audio_format == 'm4b':
+                finalize_m4b(archive_directory_for_target(target), started_at, chapter_percent)
             with lock:
                 active[url] = {'status': 'done', 'title': title, 'target': target}
             print(f'[✓] Downloaded: {title}')
@@ -240,6 +283,104 @@ def run_download(url, quality, audio_format=None, target='video'):
         with lock:
             active[url] = {'status': 'error', 'error': str(e)}
         print(f'[✗] Exception: {e}')
+
+def find_newest_m4a(archive_dir, started_at):
+    candidates = []
+    for path in Path(archive_dir).rglob('*.m4a'):
+        try:
+            modified_at = path.stat().st_mtime
+        except OSError:
+            continue
+        if modified_at >= started_at - 120:
+            candidates.append((modified_at, path))
+    return max(candidates, default=(None, None))[1]
+
+def read_duration(media_path):
+    info_path = Path(media_path).with_suffix('.info.json')
+    if not info_path.exists():
+        return 0
+    try:
+        with info_path.open('r', encoding='utf-8') as handle:
+            return float(json.load(handle).get('duration') or 0)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+def escape_metadata(value):
+    return (
+        value
+        .replace('\\', '\\\\')
+        .replace('=', '\\=')
+        .replace(';', '\\;')
+        .replace('#', '\\#')
+        .replace('\n', '\\\n')
+    )
+
+def build_chapter_metadata(media_path, chapter_percent):
+    duration = read_duration(media_path)
+    lines = [';FFMETADATA1', f'title={escape_metadata(Path(media_path).stem)}']
+    if duration <= 0:
+        return '\n'.join(lines)
+
+    chapter_count = 100 // chapter_percent
+    duration_ms = int(duration * 1000)
+    for index in range(chapter_count):
+        start = duration_ms * index // chapter_count
+        end = duration_ms if index == chapter_count - 1 else duration_ms * (index + 1) // chapter_count
+        lines.extend([
+            '[CHAPTER]',
+            'TIMEBASE=1/1000',
+            f'START={start}',
+            f'END={end}',
+            f'title={chapter_percent * index}%',
+        ])
+    return '\n'.join(lines)
+
+def find_ffmpeg():
+    jellyfin_ffmpeg = os.environ.get('JELLYFIN_FFMPEG_PATH', '')
+    if jellyfin_ffmpeg and Path(jellyfin_ffmpeg).exists():
+        return jellyfin_ffmpeg
+    return shutil.which('ffmpeg') or 'ffmpeg'
+
+def finalize_m4b(archive_dir, started_at, chapter_percent=None):
+    source = find_newest_m4a(archive_dir, started_at)
+    if not source:
+        print('WARNING: could not find extracted m4a to finalize as m4b')
+        return
+
+    destination = source.with_suffix('.m4b')
+    if chapter_percent is None:
+        source.replace(destination)
+        return
+
+    metadata_path = None
+    temp_path = source.with_name(f'{source.stem}.tmp.m4b')
+    try:
+        with tempfile.NamedTemporaryFile('w', suffix='.ffmetadata', delete=False, encoding='utf-8') as handle:
+            metadata_path = Path(handle.name)
+            handle.write(build_chapter_metadata(source, chapter_percent))
+
+        result = subprocess.run([
+            find_ffmpeg(),
+            '-y',
+            '-i', str(source),
+            '-i', str(metadata_path),
+            '-map_metadata', '1',
+            '-codec', 'copy',
+            str(temp_path),
+        ], capture_output=True, text=True)
+        if result.returncode == 0:
+            temp_path.replace(destination)
+            source.unlink(missing_ok=True)
+        else:
+            print(f'WARNING: could not add m4b chapters: {result.stderr.strip()}')
+            source.replace(destination)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f'WARNING: could not add m4b chapters: {exc}')
+        source.replace(destination)
+    finally:
+        if metadata_path:
+            metadata_path.unlink(missing_ok=True)
+        temp_path.unlink(missing_ok=True)
 
 # ─── HTTP handler ─────────────────────────────────────────────────────────────
 
@@ -293,6 +434,9 @@ class Handler(BaseHTTPRequestHandler):
                 'ytdlp': YTDLP or 'not found',
                 'downloadDir': str(DOWNLOAD_DIR),
                 'musicDownloadDir': str(MUSIC_DOWNLOAD_DIR),
+                'podcastDownloadDir': str(PODCAST_DOWNLOAD_DIR),
+                'audiobookDownloadDir': str(AUDIOBOOK_DOWNLOAD_DIR),
+                'otherDownloadDir': str(OTHER_DOWNLOAD_DIR),
                 'jellyfin': {
                     'enabled': jellyfin_enabled(),
                     'url': JELLYFIN_URL or None,
@@ -300,17 +444,29 @@ class Handler(BaseHTTPRequestHandler):
                     'libraryType': JELLYFIN_LIBRARY_TYPE,
                     'musicLibraryName': JELLYFIN_MUSIC_LIBRARY_NAME,
                     'musicLibraryType': JELLYFIN_MUSIC_LIBRARY_TYPE,
+                    'podcastLibraryName': JELLYFIN_PODCAST_LIBRARY_NAME,
+                    'podcastLibraryType': 'music',
+                    'audiobookLibraryName': JELLYFIN_AUDIOBOOK_LIBRARY_NAME,
+                    'audiobookLibraryType': 'books',
+                    'otherLibraryName': JELLYFIN_OTHER_LIBRARY_NAME,
+                    'otherLibraryType': 'tvshows',
                 },
             })
         elif self.path == '/save-types':
             self.send_json(200, {'saveTypes': [
-                {'label': 'Best to Other', 'quality': 'best', 'icon': '★', 'target': 'video'},
-                {'label': '1080p to Other', 'quality': '1080', 'icon': 'HD', 'target': 'video'},
-                {'label': '720p to Other', 'quality': '720', 'icon': 'HD', 'target': 'video'},
-                {'label': '480p to Other', 'quality': '480', 'icon': 'SD', 'target': 'video'},
+                {'label': 'Best to Other', 'quality': 'best', 'icon': '★', 'target': 'other'},
+                {'label': '1080p to Other', 'quality': '1080', 'icon': 'HD', 'target': 'other'},
+                {'label': '720p to Other', 'quality': '720', 'icon': 'HD', 'target': 'other'},
+                {'label': '480p to Other', 'quality': '480', 'icon': 'SD', 'target': 'other'},
                 {'label': 'MP3 to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'mp3', 'target': 'music'},
                 {'label': 'M4A to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'm4a', 'target': 'music'},
                 {'label': 'Opus to Music', 'quality': 'audio', 'icon': '♫', 'audioFormat': 'opus', 'target': 'music'},
+                {'label': 'MP3 to Podcast', 'quality': 'audio', 'icon': '◉', 'audioFormat': 'mp3', 'target': 'podcast'},
+                {'label': 'M4A to Podcast', 'quality': 'audio', 'icon': '◉', 'audioFormat': 'm4a', 'target': 'podcast'},
+                {'label': 'M4B Audiobook', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook'},
+                {'label': 'M4B Audiobook 10% chapters', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook', 'chapterPercent': 10},
+                {'label': 'M4B Audiobook 20% chapters', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4b', 'target': 'audiobook', 'chapterPercent': 20},
+                {'label': 'M4A to Audiobooks', 'quality': 'audio', 'icon': '▣', 'audioFormat': 'm4a', 'target': 'audiobook'},
             ]})
         elif self.path == '/status':
             with lock:
@@ -337,7 +493,8 @@ class Handler(BaseHTTPRequestHandler):
         url     = data.get('url', '').strip()
         quality = data.get('quality', 'best')
         audio_format = data.get('audioFormat')
-        target = data.get('target', 'video')
+        target = normalize_target(data.get('target', 'other'))
+        chapter_percent = data.get('chapterPercent')
 
         if not url:
             self.send_json(400, {'error': 'Missing url'})
@@ -356,8 +513,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {'error': f'Unsupported audio format: {audio_format}'})
             return
 
-        if target not in {'video', 'music'}:
+        if not target:
             self.send_json(400, {'error': f'Unsupported target: {target}'})
+            return
+
+        if chapter_percent is not None and chapter_percent not in {10, 20}:
+            self.send_json(400, {'error': 'chapterPercent must be 10 or 20'})
             return
 
         if not YTDLP:
@@ -373,7 +534,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         # Start download in background thread
-        t = threading.Thread(target=run_download, args=(url, quality, audio_format, target), daemon=True)
+        t = threading.Thread(target=run_download, args=(url, quality, audio_format, target, chapter_percent), daemon=True)
         t.start()
 
         label = f'{quality}/{audio_format}' if quality == 'audio' and audio_format else quality
@@ -397,8 +558,14 @@ if __name__ == '__main__':
     print(f'yt-dlp found at: {YTDLP}')
     print(f'Saving downloads to: {DOWNLOAD_DIR}')
     print(f'Saving music downloads to: {MUSIC_DOWNLOAD_DIR}')
+    print(f'Saving podcast downloads to: {PODCAST_DOWNLOAD_DIR}')
+    print(f'Saving audiobook downloads to: {AUDIOBOOK_DOWNLOAD_DIR}')
+    print(f'Saving other downloads to: {OTHER_DOWNLOAD_DIR}')
     ensure_jellyfin_library(JELLYFIN_LIBRARY_NAME, JELLYFIN_LIBRARY_TYPE, DOWNLOAD_DIR)
     ensure_jellyfin_library(JELLYFIN_MUSIC_LIBRARY_NAME, JELLYFIN_MUSIC_LIBRARY_TYPE, MUSIC_DOWNLOAD_DIR)
+    ensure_jellyfin_library(JELLYFIN_PODCAST_LIBRARY_NAME, 'music', PODCAST_DOWNLOAD_DIR)
+    ensure_jellyfin_library(JELLYFIN_AUDIOBOOK_LIBRARY_NAME, 'books', AUDIOBOOK_DOWNLOAD_DIR)
+    ensure_jellyfin_library(JELLYFIN_OTHER_LIBRARY_NAME, 'tvshows', OTHER_DOWNLOAD_DIR)
     print(f'Server running at http://localhost:{PORT}')
     print('Keep this window open while using the Chrome extension.\n')
 

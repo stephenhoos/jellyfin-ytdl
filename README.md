@@ -116,7 +116,9 @@ library and scan.
 Then paste the Browser API token from the Jellyfin plugin settings into the
 extension popup. Open a YouTube video and use the red `DOWNLOAD` button in the
 player. The picker fetches its save types from the Jellyfin plugin, so plugin
-updates can change the Chrome menu without editing the extension.
+updates can change the Chrome menu without editing the extension. You can also
+right-click a YouTube link or page and choose `Send link to ytdl`, then pick a
+Video, Music, Podcast, or Audiobook save type from the submenu.
 
 For another computer on the LAN, enable "Allow Chrome extensions on my LAN to
 use this downloader", set the Chrome extension server URL to the Jellyfin

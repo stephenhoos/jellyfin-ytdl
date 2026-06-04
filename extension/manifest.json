@@ -4,6 +4,7 @@
   "version": "0.0.0.2",
   "description": "Adds a YouTube download button for saving videos, music, podcasts, and audiobooks into Jellyfin YtdlArchive libraries.",
   "permissions": [
+    "contextMenus",
     "storage",
     "tabs"
   ],

@@ -963,6 +963,95 @@ test('background script returns cached and refreshed browser tokens', async () =
   assert.equal(tokenFetches, 1);
 });
 
+test('background script creates context menu save type submenus and queues clicked links', async () => {
+  const store = { apiToken: 'menu-token', serverUrl: 'http://localhost:9876' };
+  const createdMenus = [];
+  const downloads = [];
+  let clickListener;
+  globalThis.chrome = {
+    runtime: {
+      lastError: null,
+      onInstalled: { addListener() {} },
+      onStartup: { addListener() {} },
+      onMessage: { addListener() {} }
+    },
+    contextMenus: {
+      removeAll(callback) {
+        createdMenus.length = 0;
+        callback();
+      },
+      create(options, callback) {
+        createdMenus.push(options);
+        callback?.();
+      },
+      onClicked: {
+        addListener(callback) {
+          clickListener = callback;
+        }
+      }
+    },
+    storage: {
+      local: {
+        get(defaults, callback) {
+          callback({ ...defaults, ...store });
+        },
+        set(values, callback) {
+          Object.assign(store, values);
+          callback();
+        }
+      }
+    }
+  };
+
+  const saveTypes = [
+    { label: 'MP3 to Music', quality: 'audio', audioFormat: 'mp3', target: 'music' },
+    { label: 'M4A to Audiobooks', quality: 'audio', audioFormat: 'm4a', target: 'audiobook' }
+  ];
+  globalThis.fetch = async (url, options = {}) => {
+    if (url.endsWith('/save-types')) {
+      assert.equal(options.headers.get('X-YtdlArchive-Token'), 'menu-token');
+      return {
+        ok: true,
+        json: async () => ({ saveTypes })
+      };
+    }
+
+    if (url.endsWith('/download')) {
+      downloads.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        json: async () => ({ queued: true })
+      };
+    }
+
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  await importFresh('./extension/background.js');
+  await flushAsync();
+
+  const root = createdMenus.find(menu => menu.id === 'ytdlArchive.sendLink');
+  const audiobookGroup = createdMenus.find(menu => menu.title === 'Audiobook');
+  const audiobookItem = createdMenus.find(menu => menu.parentId === audiobookGroup.id && menu.title === 'M4A');
+
+  assert.equal(root.title, 'Send link to ytdl');
+  assert.ok(createdMenus.some(menu => menu.title === 'Music'));
+  assert.ok(audiobookItem);
+
+  clickListener({
+    menuItemId: audiobookItem.id,
+    linkUrl: 'https://youtu.be/dQw4w9WgXcQ'
+  }, {});
+  await flushAsync();
+
+  assert.deepEqual(downloads, [{
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    quality: 'audio',
+    audioFormat: 'm4a',
+    target: 'audiobook'
+  }]);
+});
+
 test('background script rejects token fetches for invalid configured URLs', async () => {
   let listener;
   const store = { apiToken: '', serverUrl: 'not a url' };
