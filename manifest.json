@@ -8,6 +8,14 @@
     "category": "Metadata",
     "versions": [
       {
+        "version": "0.0.0.2",
+        "changelog": "Adds Chrome right-click Send link to ytdl context menus, repository manifest metadata, and expanded save target support.",
+        "targetAbi": "10.11.6.0",
+        "sourceUrl": "https://github.com/stephenhoos/jellyfin-ytdl/releases/download/v0.0.0.2-beta/YtdlArchive-0.0.0.2.zip",
+        "checksum": "47b8ddbea82ca65238aa2818b33c94c8",
+        "timestamp": "2026-06-04T02:25:00Z"
+      },
+      {
         "version": "0.0.0.1",
         "changelog": "Initial public beta for saving YouTube downloads into Jellyfin libraries.",
         "targetAbi": "10.11.6.0",
