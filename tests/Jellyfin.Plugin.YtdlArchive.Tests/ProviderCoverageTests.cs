@@ -1,5 +1,8 @@
+using System.Reflection;
+using System.Text.Json;
 using Jellyfin.Plugin.YtdlArchive.Providers;
 using Jellyfin.Plugin.YtdlArchive.Services;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.TV;
@@ -13,6 +16,8 @@ namespace Jellyfin.Plugin.YtdlArchive.Tests;
 
 public sealed class ProviderCoverageTests
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public void YouTubeExternalIds_SupportExpectedJellyfinItemTypes()
     {
@@ -228,12 +233,17 @@ public sealed class ProviderCoverageTests
 
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(YtdlpManager));
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(LibraryReconciler));
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(ChannelSubscriptionManager));
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(DownloaderHostedService));
         Assert.Contains(services, descriptor =>
             descriptor.ServiceType == typeof(IHostedService)
             && descriptor.ImplementationType == typeof(LibraryBootstrapHostedService));
         Assert.Contains(services, descriptor =>
             descriptor.ServiceType == typeof(IHostedService)
-            && descriptor.ImplementationType == typeof(DownloaderHostedService));
+            && descriptor.ImplementationFactory is not null);
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(IHostedService)
+            && descriptor.ImplementationType == typeof(SubscriptionPollingHostedService));
     }
 
     [Fact]
@@ -269,8 +279,73 @@ public sealed class ProviderCoverageTests
         }
     }
 
+    [Fact]
+    public async Task SeriesProvider_AddsSubscriptionStatusToChannelOverview()
+    {
+        var root = Directory.CreateTempSubdirectory();
+        var directory = Directory.CreateTempSubdirectory("Nerdrotic [UC5T0tXJN5CrMZUEJuz4oovw]");
+        try
+        {
+            WriteSubscriptionStore(root.FullName, new ChannelSubscription
+            {
+                ChannelId = "UC5T0tXJN5CrMZUEJuz4oovw",
+                ChannelName = "Nerdrotic",
+                ChannelUrl = "https://www.youtube.com/channel/UC5T0tXJN5CrMZUEJuz4oovw/videos",
+                Quality = "1080",
+                Target = "other"
+            });
+
+            var result = await new YtdlSeriesLocalProvider(CreateSubscriptionManager(root.FullName)).GetMetadata(
+                new ItemInfo(new Series { Path = directory.FullName }),
+                directoryService: null!,
+                CancellationToken.None);
+
+            Assert.True(result.HasMetadata);
+            Assert.Contains("YtdlArchive: Subscribed to Other (1080).", result.Item.Overview);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MusicAlbumProvider_AddsSubscriptionStatusToChannelOverview()
+    {
+        var root = Directory.CreateTempSubdirectory();
+        var directory = Directory.CreateTempSubdirectory("Podcast Channel [UCmusic]");
+        try
+        {
+            WriteAudioSidecar(Path.Combine(directory.FullName, "track.m4a"));
+            WriteSubscriptionStore(root.FullName, new ChannelSubscription
+            {
+                ChannelId = "UCmusic",
+                ChannelName = "Channel Name",
+                ChannelUrl = "https://www.youtube.com/channel/UCmusic/videos",
+                Quality = "audio",
+                AudioFormat = "mp3",
+                Target = "podcast"
+            });
+
+            var result = await new YtdlMusicAlbumLocalProvider(CreateSubscriptionManager(root.FullName)).GetMetadata(
+                new ItemInfo(new MusicAlbum { Path = directory.FullName }),
+                directoryService: null!,
+                CancellationToken.None);
+
+            Assert.True(result.HasMetadata);
+            Assert.Contains("YtdlArchive: Subscribed to Podcast (MP3).", result.Item.Overview);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static void WriteAudioSidecar(string mediaPath)
     {
+        File.WriteAllText(mediaPath, string.Empty);
         File.WriteAllText(
             Path.ChangeExtension(mediaPath, ".info.json"),
             """
@@ -282,6 +357,7 @@ public sealed class ProviderCoverageTests
               "album": "Album Name",
               "description": "Audio notes",
               "channel": "Channel Name",
+              "channel_id": "UCmusic",
               "release_date": "20260520",
               "duration": 125,
               "view_count": 1234,
@@ -291,6 +367,39 @@ public sealed class ProviderCoverageTests
               "tags": ["live"]
             }
             """);
+    }
+
+    private static ChannelSubscriptionManager CreateSubscriptionManager(string root)
+        => new(
+            ytdlpManager: null!,
+            ApplicationPathsProxy.Create(root),
+            NullLogger<ChannelSubscriptionManager>.Instance);
+
+    private static void WriteSubscriptionStore(string root, ChannelSubscription subscription)
+    {
+        var directory = Path.Combine(root, "plugins", "YtdlArchive");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "subscriptions.json"),
+            JsonSerializer.Serialize(new
+            {
+                subscriptions = new[] { subscription }
+            }, WebJsonOptions));
+    }
+
+    public class ApplicationPathsProxy : DispatchProxy
+    {
+        private string _root = string.Empty;
+
+        public static IApplicationPaths Create(string root)
+        {
+            var proxy = Create<IApplicationPaths, ApplicationPathsProxy>();
+            ((ApplicationPathsProxy)(object)proxy)._root = root;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.ReturnType == typeof(string) ? _root : null;
     }
 
     private sealed class RecordingFileSystem : IFileSystem

@@ -127,6 +127,9 @@
                         <button is="emby-button" type="button" class="raised" id="btnWriteChromeExtensionConfig">
                             <span>Update Chrome extension config</span>
                         </button>
+                        <button is="emby-button" type="button" class="raised" id="btnDownloadChromeExtensionZip">
+                            <span>Download Chrome extension ZIP</span>
+                        </button>
                         <div class="fieldDescription">Use the Jellyfin server LAN address for other computers. After changing LAN access, restart Jellyfin so the downloader listens on the LAN address.</div>
                     </div>
 
@@ -292,6 +295,32 @@
 
                             return payload;
                         });
+                    });
+                }
+
+                function downloaderDownload(path, filename, configPage) {
+                    return fetch('http://localhost:9876' + path, {
+                        method: 'GET',
+                        headers: {
+                            'X-YtdlArchive-Token': browserApiToken(configPage)
+                        }
+                    }).then(function (response) {
+                        if (!response.ok) {
+                            return response.json().then(function (payload) {
+                                throw new Error((payload && payload.error) || response.statusText || 'Download failed');
+                            });
+                        }
+
+                        return response.blob();
+                    }).then(function (blob) {
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        URL.revokeObjectURL(url);
                     });
                 }
 
@@ -665,12 +694,31 @@
                     }).finally(Dashboard.hideLoadingMsg);
                 }
 
+                function downloadChromeExtensionZip(event) {
+                    const button = event.target.closest?.('#btnDownloadChromeExtensionZip');
+                    if (!button) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    const configPage = findPage(button);
+                    Dashboard.showLoadingMsg();
+                    saveConfig(configPage).then(function () {
+                        return downloaderDownload('/extension/zip', 'YtdlArchive-ChromeExtension.zip', configPage);
+                    }).then(function () {
+                        setStatus(configPage, 'Chrome extension ZIP downloaded.');
+                    }).catch(function (err) {
+                        setStatus(configPage, (err && (err.message || err.Message)) || 'Could not download Chrome extension ZIP.');
+                    }).finally(Dashboard.hideLoadingMsg);
+                }
+
                 if (!globalThis.ytdlArchiveConfigDelegatesBound) {
                     globalThis.ytdlArchiveConfigDelegatesBound = true;
                     document.addEventListener('submit', submitForm);
                     document.addEventListener('click', browseDirectory);
                     document.addEventListener('click', regenerateBrowserApiToken);
                     document.addEventListener('click', writeChromeExtensionConfig);
+                    document.addEventListener('click', downloadChromeExtensionZip);
                     document.addEventListener('viewshow', function (event) {
                         const configPage = findPage(event.target);
                         if (configPage) {

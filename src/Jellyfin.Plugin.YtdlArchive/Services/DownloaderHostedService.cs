@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -71,6 +72,7 @@ public sealed class DownloaderHostedService : BackgroundService
     private readonly ILogger<DownloaderHostedService> _logger;
     private readonly YtdlpManager _ytdlpManager;
     private readonly LibraryReconciler _libraryReconciler;
+    private readonly ChannelSubscriptionManager _subscriptions;
     private readonly ConcurrentDictionary<string, DownloadStatus> _active = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _libraryScanLock = new(1, 1);
     private readonly SemaphoreSlim _downloadLock;
@@ -81,11 +83,13 @@ public sealed class DownloaderHostedService : BackgroundService
     public DownloaderHostedService(
         ILogger<DownloaderHostedService> logger,
         YtdlpManager ytdlpManager,
-        LibraryReconciler libraryReconciler)
+        LibraryReconciler libraryReconciler,
+        ChannelSubscriptionManager subscriptions)
     {
         _logger = logger;
         _ytdlpManager = ytdlpManager;
         _libraryReconciler = libraryReconciler;
+        _subscriptions = subscriptions;
         _downloadLock = new SemaphoreSlim(Math.Clamp(Plugin.Instance?.Configuration.MaxConcurrentDownloads ?? 2, 1, 6));
     }
 
@@ -215,85 +219,7 @@ public sealed class DownloaderHostedService : BackgroundService
 
         try
         {
-            if (IsRoute(method, path, "GET", "/ping"))
-            {
-                await SendJsonAsync(context.Response, 200, new
-                {
-                    ok = true,
-                    embedded = true,
-                    serverUrl = EffectiveAdvertisedServerUrl(),
-                    lanBrowserAccess = Plugin.Instance?.Configuration.EnableLanBrowserAccess == true,
-                    ytdlp = _ytdlpPath ?? "not found",
-                    ytdlpVersion = _ytdlpVersion,
-                    managedYtdlp = _ytdlpPath == _ytdlpManager.ManagedPath,
-                    downloadDir = DownloadDirectory,
-                    musicDownloadDir = MusicDownloadDirectory,
-                    podcastDownloadDir = ArchiveSettings.PodcastDownloadDirectory,
-                    audiobookDownloadDir = ArchiveSettings.AudiobookDownloadDirectory,
-                    otherDownloadDir = ArchiveSettings.OtherDownloadDirectory,
-                    jellyfin = new
-                    {
-                        enabled = true,
-                        musicLibraryName = ArchiveSettings.MusicLibraryName,
-                        musicLibraryType = "music",
-                        podcastLibraryName = ArchiveSettings.PodcastLibraryName,
-                        podcastLibraryType = "music",
-                        audiobookLibraryName = ArchiveSettings.AudiobookLibraryName,
-                        audiobookLibraryType = "books",
-                        otherLibraryName = ArchiveSettings.OtherLibraryName,
-                        otherLibraryType = "tvshows"
-                    }
-                }, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/save-types"))
-            {
-                await SendJsonAsync(context.Response, 200, new
-                {
-                    saveTypes = SaveTypes,
-                    defaults = new
-                    {
-                        music = ArchiveSettings.MusicLibraryName,
-                        podcast = ArchiveSettings.PodcastLibraryName,
-                        audiobook = ArchiveSettings.AudiobookLibraryName,
-                        other = ArchiveSettings.OtherLibraryName
-                    }
-                }, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/status"))
-            {
-                await SendJsonAsync(context.Response, 200, _active, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/download"))
-            {
-                await QueueDownloadAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/directories"))
-            {
-                await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/extension/config"))
-            {
-                await WriteBrowserExtensionConfigAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/libraries/reconcile"))
-            {
-                await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            await SendJsonAsync(context.Response, 404, new { error = "Not found" }, cancellationToken).ConfigureAwait(false);
+            await HandleAuthorizedAsync(context, method, path, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -303,6 +229,108 @@ public sealed class DownloaderHostedService : BackgroundService
                 await SendJsonAsync(context.Response, 500, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task HandleAuthorizedAsync(HttpListenerContext context, string method, string? path, CancellationToken cancellationToken)
+    {
+        if (IsRoute(method, path, "GET", "/ping"))
+        {
+            await SendPingAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/save-types"))
+        {
+            await SendSaveTypesAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/status"))
+        {
+            await SendJsonAsync(context.Response, 200, _active, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/download"))
+        {
+            await QueueDownloadFromRequestAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/subscriptions"))
+        {
+            await ListSubscriptionsAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/subscriptions"))
+        {
+            await SubscribeAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await HandleAuthorizedAdminAsync(context, method, path, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleAuthorizedAdminAsync(HttpListenerContext context, string method, string? path, CancellationToken cancellationToken)
+    {
+        if (IsRoute(method, path, "POST", "/directories"))
+        {
+            await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/extension/config"))
+        {
+            await WriteBrowserExtensionConfigAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/extension/zip"))
+        {
+            await SendBrowserExtensionZipAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/libraries/reconcile"))
+        {
+            await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await SendJsonAsync(context.Response, 404, new { error = "Not found" }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task SendPingAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        await SendJsonAsync(context.Response, 200, new
+        {
+            ok = true,
+            embedded = true,
+            serverUrl = EffectiveAdvertisedServerUrl(),
+            lanBrowserAccess = Plugin.Instance?.Configuration.EnableLanBrowserAccess == true,
+            ytdlp = _ytdlpPath ?? "not found",
+            ytdlpVersion = _ytdlpVersion,
+            managedYtdlp = _ytdlpPath == _ytdlpManager.ManagedPath,
+            downloadDir = DownloadDirectory,
+            musicDownloadDir = MusicDownloadDirectory,
+            podcastDownloadDir = ArchiveSettings.PodcastDownloadDirectory,
+            audiobookDownloadDir = ArchiveSettings.AudiobookDownloadDirectory,
+            otherDownloadDir = ArchiveSettings.OtherDownloadDirectory,
+            jellyfin = new
+            {
+                enabled = true,
+                musicLibraryName = ArchiveSettings.MusicLibraryName,
+                musicLibraryType = "music",
+                podcastLibraryName = ArchiveSettings.PodcastLibraryName,
+                podcastLibraryType = "music",
+                audiobookLibraryName = ArchiveSettings.AudiobookLibraryName,
+                audiobookLibraryType = "books",
+                otherLibraryName = ArchiveSettings.OtherLibraryName,
+                otherLibraryType = "tvshows"
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SendSaveTypesAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        await SendJsonAsync(context.Response, 200, new
+        {
+            saveTypes = SaveTypes,
+            defaults = new
+            {
+                music = ArchiveSettings.MusicLibraryName,
+                podcast = ArchiveSettings.PodcastLibraryName,
+                audiobook = ArchiveSettings.AudiobookLibraryName,
+                other = ArchiveSettings.OtherLibraryName
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task CreateDirectoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -371,7 +399,7 @@ public sealed class DownloaderHostedService : BackgroundService
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task QueueDownloadAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    private async Task QueueDownloadFromRequestAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
         using var body = await JsonDocument.ParseAsync(context.Request.InputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
         var root = body.RootElement;
@@ -387,59 +415,143 @@ public sealed class DownloaderHostedService : BackgroundService
             return;
         }
 
-        if (!IsAllowedDownloadUrl(url))
+        var result = await QueueDownloadAsync(
+            new DownloadQueueRequest(url, quality, audioFormat, target, chapterPercent),
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Error is not null)
         {
-            await SendJsonAsync(context.Response, 400, new { error = "Only YouTube URLs are allowed by default" }, cancellationToken).ConfigureAwait(false);
+            await SendJsonAsync(context.Response, result.Error.StartsWith("yt-dlp not found", StringComparison.Ordinal) ? 500 : 400, new { error = result.Error }, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        await SendJsonAsync(context.Response, 200, new
+        {
+            queued = result.Queued,
+            reason = result.Reason,
+            saveTo = result.SaveTo,
+            target = result.Target
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<DownloadQueueResult> QueueDownloadAsync(DownloadQueueRequest request, CancellationToken cancellationToken)
+    {
+        var url = request.Url.Trim();
+        var quality = string.IsNullOrWhiteSpace(request.Quality) ? "best" : request.Quality;
+        var audioFormat = request.AudioFormat;
+        var target = ArchiveSettings.NormalizeTarget(request.Target);
+        var chapterPercent = request.ChapterPercent;
+
+        if (!IsAllowedDownloadUrl(url))
+        {
+            return new DownloadQueueResult(false, null, "Only YouTube URLs are allowed by default", null, null);
+        }
+
+        _ytdlpPath ??= await _ytdlpManager.EnsureAsync(cancellationToken).ConfigureAwait(false);
         if (_ytdlpPath is null)
         {
-            await SendJsonAsync(context.Response, 500, new { error = "yt-dlp not found. Install it with: pip install yt-dlp" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "yt-dlp not found. Install it with: pip install yt-dlp", null, null);
         }
 
         if (!QualityFormats.ContainsKey(quality))
         {
-            await SendJsonAsync(context.Response, 400, new { error = $"Unsupported quality: {quality}" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, $"Unsupported quality: {quality}", null, null);
         }
 
         if (quality.Equals(AudioQuality, StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(audioFormat)
             && !SupportedAudioFormats.Contains(audioFormat))
         {
-            await SendJsonAsync(context.Response, 400, new { error = $"Unsupported audio format: {audioFormat}" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, $"Unsupported audio format: {audioFormat}", null, null);
         }
 
         if (target.Length == 0)
         {
-            await SendJsonAsync(context.Response, 400, new { error = "Unsupported target" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "Unsupported target", null, null);
         }
 
         if (chapterPercent is not null && chapterPercent is not (10 or 20))
         {
-            await SendJsonAsync(context.Response, 400, new { error = "chapterPercent must be 10 or 20" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, null, "chapterPercent must be 10 or 20", null, null);
         }
 
         if (_active.TryGetValue(url, out var existing) && existing.Status is "downloading" or "queued")
         {
-            await SendJsonAsync(context.Response, 200, new { queued = false, reason = "already downloading" }, cancellationToken).ConfigureAwait(false);
-            return;
+            return new DownloadQueueResult(false, "already downloading", null, null, target);
         }
 
         _active[url] = new DownloadStatus("queued", string.Empty, null, target);
         _ = Task.Run(() => RunDownloadAsync(url, quality, audioFormat, target, chapterPercent, CancellationToken.None), CancellationToken.None);
 
+        return new DownloadQueueResult(true, null, null, ArchiveDirectoryForTarget(target), target);
+    }
+
+    private async Task ListSubscriptionsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var subscriptions = await _subscriptions.ListAsync(cancellationToken).ConfigureAwait(false);
         await SendJsonAsync(context.Response, 200, new
         {
-            queued = true,
-            saveTo = ArchiveDirectoryForTarget(target),
-            target
+            subscriptions,
+            storePath = _subscriptions.CurrentStorePath,
+            legacyStorePath = _subscriptions.CurrentLegacyStorePath
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SubscribeAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var request = await JsonSerializer.DeserializeAsync<SubscriptionRequest>(context.Request.InputStream, WebJsonOptions, cancellationToken).ConfigureAwait(false);
+        if (request is null)
+        {
+            await SendJsonAsync(context.Response, 400, new { error = "Invalid subscription request" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            var subscription = await _subscriptions.SubscribeAsync(request, cancellationToken).ConfigureAwait(false);
+            var queuedExisting = request.DownloadExistingVideos
+                ? await QueueExistingSubscriptionVideosAsync(subscription, cancellationToken).ConfigureAwait(false)
+                : Array.Empty<object>();
+            await SendJsonAsync(context.Response, 200, new { subscribed = true, subscription, queuedExisting }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex)
+        {
+            await SendJsonAsync(context.Response, 400, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await SendJsonAsync(context.Response, 500, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<IReadOnlyList<object>> QueueExistingSubscriptionVideosAsync(ChannelSubscription subscription, CancellationToken cancellationToken)
+    {
+        var videos = await _subscriptions.FindExistingVideosAsync(subscription, cancellationToken).ConfigureAwait(false);
+        var queuedIds = new List<string>();
+        var results = new List<object>();
+        foreach (var video in videos)
+        {
+            var result = await QueueDownloadAsync(
+                new DownloadQueueRequest(video.Url, subscription.Quality, subscription.AudioFormat, subscription.Target, subscription.ChapterPercent),
+                cancellationToken).ConfigureAwait(false);
+            if (result.Queued)
+            {
+                queuedIds.Add(video.Id);
+            }
+
+            results.Add(new
+            {
+                video.Id,
+                video.Title,
+                video.Url,
+                queued = result.Queued,
+                reason = result.Reason,
+                error = result.Error
+            });
+        }
+
+        await _subscriptions.MarkCheckedAsync(subscription, queuedIds, cancellationToken).ConfigureAwait(false);
+        return results;
     }
 
     private async Task RunDownloadAsync(string url, string quality, string? audioFormat, string target, int? chapterPercent, CancellationToken cancellationToken)
@@ -823,6 +935,38 @@ public sealed class DownloaderHostedService : BackgroundService
             extensionDirectory = result.ExtensionDirectory,
             configPath = result.ConfigPath
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SendBrowserExtensionZipAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var result = await WriteBrowserExtensionConfigFileAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            await SendJsonAsync(context.Response, 503, new { error = "Browser API token is not available" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await using var archiveStream = new MemoryStream();
+        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var path in Directory.EnumerateFiles(result.ExtensionDirectory)
+                .Where(path => !Path.GetFileName(path).StartsWith("._", StringComparison.Ordinal))
+                .Order(StringComparer.OrdinalIgnoreCase))
+            {
+                var entry = archive.CreateEntry(Path.GetFileName(path), CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var fileStream = File.OpenRead(path);
+                await fileStream.CopyToAsync(entryStream, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        var bytes = archiveStream.ToArray();
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = "attachment; filename=\"YtdlArchive-ChromeExtension.zip\"";
+        context.Response.ContentLength64 = bytes.Length;
+        await context.Response.OutputStream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+        context.Response.Close();
     }
 
     private static async Task TryWriteBrowserExtensionConfigFileAsync(CancellationToken cancellationToken)

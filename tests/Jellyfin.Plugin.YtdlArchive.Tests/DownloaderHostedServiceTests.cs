@@ -179,7 +179,8 @@ public sealed class DownloaderHostedServiceTests
             var service = new DownloaderHostedService(
                 NullLogger<DownloaderHostedService>.Instance,
                 ytdlpManager: null!,
-                libraryReconciler: null!);
+                libraryReconciler: null!,
+                subscriptions: null!);
             typeof(DownloaderHostedService)
                 .GetField("_ytdlpPath", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .SetValue(service, ytdlp);
@@ -210,7 +211,8 @@ public sealed class DownloaderHostedServiceTests
         var service = new DownloaderHostedService(
             NullLogger<DownloaderHostedService>.Instance,
             ytdlpManager: null!,
-            libraryReconciler: null!);
+            libraryReconciler: null!,
+            subscriptions: null!);
         var listener = new HttpListener();
         listener.Close();
         typeof(DownloaderHostedService)
@@ -229,6 +231,7 @@ public sealed class DownloaderHostedServiceTests
     [InlineData("POST", "/download", """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"flac"}""")]
     [InlineData("POST", "/directories", """{"parent":"","name":""}""")]
     [InlineData("POST", "/extension/config", "{}")]
+    [InlineData("GET", "/extension/zip", null)]
     [InlineData("POST", "/libraries/reconcile", "{}")]
     public async Task HandleAsync_RoutesKnownApiRequests(string method, string path, string? body)
     {
@@ -242,7 +245,8 @@ public sealed class DownloaderHostedServiceTests
                     new StaticHttpClientFactory(),
                     ServerPathsProxy.Create(directory.FullName),
                     NullLogger<YtdlpManager>.Instance),
-                libraryReconciler: null!);
+                libraryReconciler: null!,
+                subscriptions: null!);
             typeof(DownloaderHostedService)
                 .GetField("_ytdlpPath", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .SetValue(service, "yt-dlp");
@@ -307,12 +311,91 @@ public sealed class DownloaderHostedServiceTests
             var service = new DownloaderHostedService(
                 NullLogger<DownloaderHostedService>.Instance,
                 ytdlpManager: null!,
-                libraryReconciler: null!);
+                libraryReconciler: null!,
+                subscriptions: null!);
 
             var (statusCode, body) = await SendToHandlerAsync(service, "GET", "/browser-token", null, origin);
 
             Assert.Equal(expectedStatus, statusCode);
             Assert.NotEqual(string.Empty, body);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task HandleAsync_SubscriptionRoutesListAndCreateSubscriptions()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            EnsurePluginToken(directory.FullName);
+            var ytdlpManager = await CreateYtdlpManagerAsync(directory.FullName, """
+                #!/bin/sh
+                case "$*" in
+                  *--skip-download*) printf '%s\n' '{"channel_id":"UC1234567890123456789012","channel":"Test Channel","channel_url":"https://www.youtube.com/channel/UC1234567890123456789012"}' ;;
+                  *) printf '%s\n' '{"entries":[{"id":"video-new-1","title":"Newest"}]}' ;;
+                esac
+                """);
+            var subscriptions = new ChannelSubscriptionManager(
+                ytdlpManager,
+                ApplicationPathsProxy.Create(directory.FullName),
+                NullLogger<ChannelSubscriptionManager>.Instance);
+            var service = new DownloaderHostedService(
+                NullLogger<DownloaderHostedService>.Instance,
+                ytdlpManager,
+                libraryReconciler: null!,
+                subscriptions);
+
+            var (postStatus, postBody) = await SendToHandlerAsync(
+                service,
+                "POST",
+                "/subscriptions",
+                """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"mp3","target":"music","downloadExistingVideos":true}""");
+            var (getStatus, getBody) = await SendToHandlerAsync(service, "GET", "/subscriptions", null);
+
+            Assert.Equal(200, postStatus);
+            Assert.Contains("\"subscribed\":true", postBody, StringComparison.Ordinal);
+            Assert.Contains("\"queuedExisting\":[", postBody, StringComparison.Ordinal);
+            Assert.Contains("\"queued\":true", postBody, StringComparison.Ordinal);
+            Assert.Equal(200, getStatus);
+            Assert.Contains("Test Channel", getBody, StringComparison.Ordinal);
+            Assert.Contains("subscriptions.json", getBody, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("null", "Invalid subscription request")]
+    [InlineData("""{"url":"https://example.com/watch?v=dQw4w9WgXcQ","target":"other"}""", "Only YouTube URLs")]
+    public async Task HandleAsync_SubscriptionRouteReportsBadRequests(string body, string expected)
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            EnsurePluginToken(directory.FullName);
+            var ytdlpManager = new YtdlpManager(
+                new StaticHttpClientFactory(),
+                ServerPathsProxy.Create(directory.FullName),
+                NullLogger<YtdlpManager>.Instance);
+            var service = new DownloaderHostedService(
+                NullLogger<DownloaderHostedService>.Instance,
+                ytdlpManager,
+                libraryReconciler: null!,
+                new ChannelSubscriptionManager(
+                    ytdlpManager,
+                    ApplicationPathsProxy.Create(directory.FullName),
+                    NullLogger<ChannelSubscriptionManager>.Instance));
+
+            var (status, responseBody) = await SendToHandlerAsync(service, "POST", "/subscriptions", body);
+
+            Assert.Equal(400, status);
+            Assert.Contains(expected, responseBody, StringComparison.Ordinal);
         }
         finally
         {
@@ -425,6 +508,29 @@ public sealed class DownloaderHostedServiceTests
         var method = typeof(DownloaderHostedService).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)
             ?? throw new InvalidOperationException($"{name} was not found.");
         return (T)method.Invoke(instance, args)!;
+    }
+
+    private static async Task<YtdlpManager> CreateYtdlpManagerAsync(string root, string script)
+    {
+        var ytdlp = Path.Combine(root, OperatingSystem.IsWindows() ? "yt-dlp.cmd" : "yt-dlp");
+        await File.WriteAllTextAsync(
+            ytdlp,
+            OperatingSystem.IsWindows()
+                ? script.Replace("#!/bin/sh", "@echo off", StringComparison.Ordinal)
+                : script);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(ytdlp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        var ytdlpManager = new YtdlpManager(
+            new StaticHttpClientFactory(),
+            ServerPathsProxy.Create(root),
+            NullLogger<YtdlpManager>.Instance);
+        typeof(YtdlpManager)
+            .GetField("_resolvedPath", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(ytdlpManager, ytdlp);
+        return ytdlpManager;
     }
 
     private static void EnsurePluginToken(string root)

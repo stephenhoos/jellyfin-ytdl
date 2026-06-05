@@ -47,6 +47,11 @@ public sealed class YtdlpManager
         await _ensureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (!string.IsNullOrWhiteSpace(_resolvedPath) && File.Exists(_resolvedPath))
+            {
+                return _resolvedPath;
+            }
+
             var configuration = Plugin.Instance?.Configuration;
             var configuredPath = configuration?.YtdlpPath;
             if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))

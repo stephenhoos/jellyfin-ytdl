@@ -61,12 +61,12 @@ class FakeElement {
     if (String(value).includes('ytdl-text')) {
       const icon = new FakeElement('span', this.ownerDocument);
       icon.className = 'ytdl-icon';
-      icon.textContent = '⬇';
+      icon.textContent = String(value).includes('＋') ? '＋' : '⬇';
       this.appendChild(icon);
 
       const text = new FakeElement('span', this.ownerDocument);
       text.className = 'ytdl-text';
-      text.textContent = 'DOWNLOAD';
+      text.textContent = String(value).includes('SUBSCRIBE') ? 'SUBSCRIBE' : 'DOWNLOAD';
       this.appendChild(text);
     }
   }
@@ -286,6 +286,105 @@ test('content script queues downloads and reports completed status', async () =>
   await flushAsync();
 
   assert.match(document.getElementById('ytdl-toast').textContent, /Saved video|Downloading/);
+});
+
+test('content script subscribes to the current channel with selected save type', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
+  installChromeStorage();
+  let subscriptionBody = null;
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({
+          saveTypes: [
+            { label: 'MP3 to Music', quality: 'audio', icon: '*', audioFormat: 'mp3', target: 'music' }
+          ]
+        })
+      };
+    }
+
+    if (url.endsWith('/subscriptions')) {
+      subscriptionBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          subscribed: true,
+          subscription: { channelName: 'Test Channel' }
+        })
+      };
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  const item = pickerItems(document.getElementById('ytdl-subscribe-picker'))[0];
+  item.listeners.get('click')({ stopPropagation() {} });
+  await flushAsync();
+
+  assert.deepEqual(subscriptionBody, {
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    quality: 'audio',
+    audioFormat: 'mp3',
+    target: 'music'
+  });
+  assert.equal(document.getElementById('ytdl-subscribe-btn').querySelector('.ytdl-text').textContent, 'SUBSCRIBE');
+  assert.match(document.getElementById('ytdl-toast').textContent, /Test Channel/);
+});
+
+test('content script shows server errors from subscription attempts', async () => {
+  const document = new FakeDocument();
+  globalThis.document = document;
+  globalThis.location = {
+    href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    pathname: '/watch'
+  };
+  globalThis.MutationObserver = class {
+    observe() {}
+  };
+  globalThis.setTimeout = (callback) => {
+    callback();
+  };
+  installChromeStorage();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/save-types')) {
+      return {
+        ok: true,
+        json: async () => ({
+          saveTypes: [
+            { label: 'Best to Other', quality: 'best', icon: '*', target: 'other' }
+          ]
+        })
+      };
+    }
+
+    return {
+      ok: false,
+      statusText: 'Bad Request',
+      json: async () => ({ error: 'bad channel' })
+    };
+  };
+
+  await importFresh('./extension/content.js');
+  await flushAsync();
+  pickerItems(document.getElementById('ytdl-subscribe-picker'))[0].listeners.get('click')({ stopPropagation() {} });
+  await flushAsync();
+
+  assert.equal(document.getElementById('ytdl-subscribe-btn').querySelector('.ytdl-text').textContent, 'SUBSCRIBE');
+  assert.match(document.getElementById('ytdl-toast').textContent, /bad channel/);
 });
 
 test('content script reports failed download status and resets the button', async () => {
@@ -967,8 +1066,10 @@ test('background script creates context menu save type submenus and queues click
   const store = { apiToken: 'menu-token', serverUrl: 'http://localhost:9876' };
   const createdMenus = [];
   const downloads = [];
+  const subscriptions = [];
   let clickListener;
   let installedListener;
+  let startupListener;
   globalThis.chrome = {
     runtime: {
       lastError: null,
@@ -977,7 +1078,11 @@ test('background script creates context menu save type submenus and queues click
           installedListener = callback;
         }
       },
-      onStartup: { addListener() {} },
+      onStartup: {
+        addListener(callback) {
+          startupListener = callback;
+        }
+      },
       onMessage: { addListener() {} }
     },
     contextMenus: {
@@ -1029,20 +1134,45 @@ test('background script creates context menu save type submenus and queues click
       };
     }
 
+    if (url.endsWith('/subscriptions')) {
+      subscriptions.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        json: async () => ({ subscribed: true })
+      };
+    }
+
     throw new Error(`unexpected fetch ${url}`);
   };
 
   await importFresh('./extension/background.js');
+  clickListener({
+    menuItemId: 'ytdlArchive.subscribeChannel.type.0',
+    pageUrl: 'https://www.youtube.com/watch?v=first'
+  }, {});
+  await flushAsync();
   installedListener();
+  await flushAsync(40);
+  startupListener();
   await flushAsync(40);
 
   const root = createdMenus.find(menu => menu.id === 'ytdlArchive.sendLink');
+  const subscribeRoot = createdMenus.find(menu => menu.id === 'ytdlArchive.subscribeChannel');
+  const subscribeDownloadRoot = createdMenus.find(menu => menu.id === 'ytdlArchive.subscribeChannelAndDownload');
   const audiobookGroup = createdMenus.find(menu => menu.title === 'Audiobook');
   const audiobookItem = createdMenus.find(menu => menu.parentId === audiobookGroup.id && menu.title === 'M4A');
+  const subscribeAudiobookGroup = createdMenus.find(menu => menu.parentId === subscribeRoot.id && menu.title === 'Audiobook');
+  const subscribeAudiobookItem = createdMenus.find(menu => menu.parentId === subscribeAudiobookGroup.id && menu.title === 'M4A');
+  const subscribeDownloadAudiobookGroup = createdMenus.find(menu => menu.parentId === subscribeDownloadRoot.id && menu.title === 'Audiobook');
+  const subscribeDownloadAudiobookItem = createdMenus.find(menu => menu.parentId === subscribeDownloadAudiobookGroup.id && menu.title === 'M4A');
 
   assert.equal(root.title, 'Send link to ytdl');
+  assert.equal(subscribeRoot.title, 'Subscribe and get new videos');
+  assert.equal(subscribeDownloadRoot.title, 'Subscribe and get all videos');
   assert.ok(createdMenus.some(menu => menu.title === 'Music'));
   assert.ok(audiobookItem);
+  assert.ok(subscribeAudiobookItem);
+  assert.ok(subscribeDownloadAudiobookItem);
 
   clickListener({
     menuItemId: audiobookItem.id,
@@ -1056,6 +1186,43 @@ test('background script creates context menu save type submenus and queues click
     audioFormat: 'm4a',
     target: 'audiobook'
   }]);
+
+  clickListener({
+    menuItemId: subscribeAudiobookItem.id,
+    pageUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  }, {});
+  await flushAsync();
+
+  assert.deepEqual(subscriptions, [
+    {
+      url: 'https://www.youtube.com/watch?v=first',
+      quality: 'audio',
+      audioFormat: 'mp3',
+      target: 'music',
+      downloadExistingVideos: false
+    },
+    {
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      quality: 'audio',
+      audioFormat: 'm4a',
+      target: 'audiobook',
+      downloadExistingVideos: false
+    }
+  ]);
+
+  clickListener({
+    menuItemId: subscribeDownloadAudiobookItem.id,
+    pageUrl: 'https://www.youtube.com/watch?v=existing'
+  }, {});
+  await flushAsync();
+
+  assert.deepEqual(subscriptions.at(-1), {
+    url: 'https://www.youtube.com/watch?v=existing',
+    quality: 'audio',
+    audioFormat: 'm4a',
+    target: 'audiobook',
+    downloadExistingVideos: true
+  });
 });
 
 test('background script rejects token fetches for invalid configured URLs', async () => {

@@ -12,7 +12,10 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHttpClient();
         serviceCollection.AddSingleton<YtdlpManager>();
         serviceCollection.AddSingleton<LibraryReconciler>();
+        serviceCollection.AddSingleton<ChannelSubscriptionManager>();
+        serviceCollection.AddSingleton<DownloaderHostedService>();
         serviceCollection.AddHostedService<LibraryBootstrapHostedService>();
-        serviceCollection.AddHostedService<DownloaderHostedService>();
+        serviceCollection.AddHostedService(provider => provider.GetRequiredService<DownloaderHostedService>());
+        serviceCollection.AddHostedService<SubscriptionPollingHostedService>();
     }
 }

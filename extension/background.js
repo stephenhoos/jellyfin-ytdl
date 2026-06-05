@@ -18,6 +18,8 @@ let configLoadPromise = null;
 let contextMenuSaveTypes = [];
 
 const CONTEXT_MENU_ROOT_ID = 'ytdlArchive.sendLink';
+const CONTEXT_MENU_SUBSCRIBE_ROOT_ID = 'ytdlArchive.subscribeChannel';
+const CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID = 'ytdlArchive.subscribeChannelAndDownload';
 const CONTEXT_MENU_CONTEXTS = ['link', 'page', 'video', 'audio'];
 
 function isLocalServerUrl(serverUrl) {
@@ -156,12 +158,36 @@ async function rebuildContextMenus() {
     title: 'Send link to ytdl',
     contexts: CONTEXT_MENU_CONTEXTS
   });
+  contextMenuCreate({
+    id: CONTEXT_MENU_SUBSCRIBE_ROOT_ID,
+    title: 'Subscribe and get new videos',
+    contexts: CONTEXT_MENU_CONTEXTS
+  });
+  contextMenuCreate({
+    id: CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID,
+    title: 'Subscribe and get all videos',
+    contexts: CONTEXT_MENU_CONTEXTS
+  });
 
   groupedSaveTypes(contextMenuSaveTypes).forEach((items, target) => {
     const groupId = `${CONTEXT_MENU_ROOT_ID}.${target || 'other'}`;
+    const subscribeGroupId = `${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.${target || 'other'}`;
+    const subscribeDownloadGroupId = `${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.${target || 'other'}`;
     contextMenuCreate({
       id: groupId,
       parentId: CONTEXT_MENU_ROOT_ID,
+      title: targetGroupLabel(target),
+      contexts: CONTEXT_MENU_CONTEXTS
+    });
+    contextMenuCreate({
+      id: subscribeGroupId,
+      parentId: CONTEXT_MENU_SUBSCRIBE_ROOT_ID,
+      title: targetGroupLabel(target),
+      contexts: CONTEXT_MENU_CONTEXTS
+    });
+    contextMenuCreate({
+      id: subscribeDownloadGroupId,
+      parentId: CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID,
       title: targetGroupLabel(target),
       contexts: CONTEXT_MENU_CONTEXTS
     });
@@ -174,6 +200,18 @@ async function rebuildContextMenus() {
         title: contextMenuLabel(saveType),
         contexts: CONTEXT_MENU_CONTEXTS
       });
+      contextMenuCreate({
+        id: `${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.type.${index}`,
+        parentId: subscribeGroupId,
+        title: contextMenuLabel(saveType),
+        contexts: CONTEXT_MENU_CONTEXTS
+      });
+      contextMenuCreate({
+        id: `${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.type.${index}`,
+        parentId: subscribeDownloadGroupId,
+        title: contextMenuLabel(saveType),
+        contexts: CONTEXT_MENU_CONTEXTS
+      });
     });
   });
 }
@@ -182,9 +220,29 @@ function contextMenuUrl(info, tab) {
   return info.linkUrl || info.srcUrl || info.pageUrl || tab?.url || '';
 }
 
+function contextMenuSaveTypeIndex(rootId, menuItemId) {
+  const prefix = `${rootId}.type.`;
+  if (!menuItemId.startsWith(prefix)) {
+    return null;
+  }
+
+  return Number.parseInt(menuItemId.slice(prefix.length), 10);
+}
+
+function contextMenuRequestBody(url, saveType) {
+  return JSON.stringify({
+    url,
+    quality: saveType.quality || saveType.value,
+    audioFormat: saveType.audioFormat,
+    target: saveType.target || 'other',
+    chapterPercent: saveType.chapterPercent
+  });
+}
+
 async function queueContextMenuDownload(info, tab) {
-  const match = /\.type\.(\d+)$/.exec(String(info.menuItemId || ''));
-  if (!match) {
+  const menuItemId = String(info.menuItemId || '');
+  const index = contextMenuSaveTypeIndex(CONTEXT_MENU_ROOT_ID, menuItemId);
+  if (index === null) {
     return;
   }
 
@@ -192,7 +250,7 @@ async function queueContextMenuDownload(info, tab) {
     contextMenuSaveTypes = await loadSaveTypesForMenu();
   }
 
-  const saveType = contextMenuSaveTypes[Number.parseInt(match[1], 10)];
+  const saveType = contextMenuSaveTypes[index];
   const url = contextMenuUrl(info, tab);
   if (!saveType || !url) {
     return;
@@ -201,15 +259,40 @@ async function queueContextMenuDownload(info, tab) {
   await authorizedFetch('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url,
-      quality: saveType.quality || saveType.value,
-      audioFormat: saveType.audioFormat,
-      target: saveType.target || 'other',
-      chapterPercent: saveType.chapterPercent
-    })
+    body: contextMenuRequestBody(url, saveType)
   }).catch((error) => {
     console.warn('YtdlArchive context menu download failed.', error);
+    throw error;
+  });
+}
+
+async function queueContextMenuSubscription(info, tab, downloadExistingVideos = false) {
+  const menuItemId = String(info.menuItemId || '');
+  const rootId = downloadExistingVideos ? CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID : CONTEXT_MENU_SUBSCRIBE_ROOT_ID;
+  const index = contextMenuSaveTypeIndex(rootId, menuItemId);
+  if (index === null) {
+    return;
+  }
+
+  if (contextMenuSaveTypes.length === 0) {
+    contextMenuSaveTypes = await loadSaveTypesForMenu();
+  }
+
+  const saveType = contextMenuSaveTypes[index];
+  const url = contextMenuUrl(info, tab);
+  if (!saveType || !url) {
+    return;
+  }
+
+  await authorizedFetch('/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...JSON.parse(contextMenuRequestBody(url, saveType)),
+      downloadExistingVideos
+    })
+  }).catch((error) => {
+    console.warn('YtdlArchive context menu subscription failed.', error);
     throw error;
   });
 }
@@ -226,8 +309,18 @@ if (chrome.contextMenus) {
     });
   });
   chrome.contextMenus.onClicked.addListener((info, tab) => {
-    queueContextMenuDownload(info, tab).catch((error) => {
-      console.warn('YtdlArchive context menu download failed.', error);
+    const menuItemId = String(info.menuItemId || '');
+    let action;
+    if (menuItemId.startsWith(`${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.type.`)) {
+      action = () => queueContextMenuSubscription(info, tab);
+    } else if (menuItemId.startsWith(`${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.type.`)) {
+      action = () => queueContextMenuSubscription(info, tab, true);
+    } else {
+      action = () => queueContextMenuDownload(info, tab);
+    }
+
+    action().catch((error) => {
+      console.warn('YtdlArchive context menu action failed.', error);
     });
   });
 }

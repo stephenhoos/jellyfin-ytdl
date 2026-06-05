@@ -96,15 +96,54 @@ function injectButton() {
   const wrap = document.createElement('div');
   wrap.id = 'ytdl-btn-wrap';
 
-  // Build button
+  // Build download button
   const btn = document.createElement('button');
   btn.id = 'ytdl-btn';
   btn.title = 'Download this video';
   btn.innerHTML = `<span class="ytdl-icon">⬇</span><span class="ytdl-text">DOWNLOAD</span>`;
 
-  // Build quality picker
+  const subscribeBtn = document.createElement('button');
+  subscribeBtn.id = 'ytdl-subscribe-btn';
+  subscribeBtn.title = 'Subscribe to this channel';
+  subscribeBtn.innerHTML = `<span class="ytdl-icon">＋</span><span class="ytdl-text">SUBSCRIBE</span>`;
+
+  const picker = buildPicker('ytdl-picker', startDownload);
+  const subscribePicker = buildPicker('ytdl-subscribe-picker', startSubscription);
+
+  // Click: show picker; click elsewhere: close
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (btn.classList.contains('loading') || btn.classList.contains('done')) return;
+    subscribePicker.classList.remove('open');
+    picker.classList.toggle('open');
+  });
+
+  subscribeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (subscribeBtn.classList.contains('loading') || subscribeBtn.classList.contains('done')) return;
+    picker.classList.remove('open');
+    subscribePicker.classList.toggle('open');
+  });
+
+  document.addEventListener('click', () => {
+    picker.classList.remove('open');
+    subscribePicker.classList.remove('open');
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(subscribeBtn);
+  wrap.appendChild(picker);
+  wrap.appendChild(subscribePicker);
+
+  // Insert before the first child of right controls (before fullscreen etc.)
+  controls.insertBefore(wrap, controls.firstChild);
+  injected = true;
+}
+
+function buildPicker(id, action) {
   const picker = document.createElement('div');
-  picker.id = 'ytdl-picker';
+  picker.id = id;
+  picker.className = 'ytdl-picker';
   groupedSaveTypes(saveTypes).forEach((items, target) => {
     const section = document.createElement('div');
     section.className = 'ytdl-pick-section';
@@ -132,7 +171,7 @@ function injectButton() {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         picker.classList.remove('open');
-        startDownload(q.quality || q.value, q.audioFormat, q.target || 'other', q.chapterPercent);
+        action(q.quality || q.value, q.audioFormat, q.target || 'other', q.chapterPercent);
       });
       section.appendChild(item);
     });
@@ -140,20 +179,7 @@ function injectButton() {
     picker.appendChild(section);
   });
 
-  // Click: show picker; click elsewhere: close
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (btn.classList.contains('loading') || btn.classList.contains('done')) return;
-    picker.classList.toggle('open');
-  });
-  document.addEventListener('click', () => picker.classList.remove('open'));
-
-  wrap.appendChild(btn);
-  wrap.appendChild(picker);
-
-  // Insert before the first child of right controls (before fullscreen etc.)
-  controls.insertBefore(wrap, controls.firstChild);
-  injected = true;
+  return picker;
 }
 
 // ─── Trigger download ─────────────────────────────────────────────────────────
@@ -194,6 +220,49 @@ function startDownload(quality, audioFormat, target, chapterPercent) {
     setTimeout(() => {
       btn.classList.remove('error');
       txt.textContent = 'DOWNLOAD';
+    }, 3000);
+  });
+}
+
+function startSubscription(quality, audioFormat, target, chapterPercent) {
+  const btn = document.getElementById('ytdl-subscribe-btn');
+  const txt = btn.querySelector('.ytdl-text');
+  const url = globalThis.location.href.split('&')[0];
+
+  btn.classList.add('loading');
+  txt.textContent = 'SAVING…';
+
+  apiFetch('/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, quality, audioFormat, target, chapterPercent })
+  })
+  .then(data => {
+    if (data?.subscribed) {
+      btn.classList.remove('loading');
+      btn.classList.add('done');
+      txt.textContent = 'SUBSCRIBED';
+      const channel = data.subscription?.channelName || 'channel';
+      showToast(`✓ Subscribed to ${channel}`);
+      setTimeout(() => {
+        btn.classList.remove('done');
+        txt.textContent = 'SUBSCRIBE';
+      }, 5000);
+    } else {
+      throw new Error(data?.error || 'Server error');
+    }
+  })
+  .catch(err => {
+    btn.classList.remove('loading');
+    btn.classList.add('error');
+    txt.textContent = 'ERROR';
+    const msg = err.message.includes('fetch')
+      ? '⚠ Downloader server not running. Restart Jellyfin or enable the YtdlArchive plugin.'
+      : `⚠ ${err.message}`;
+    showToast(msg);
+    setTimeout(() => {
+      btn.classList.remove('error');
+      txt.textContent = 'SUBSCRIBE';
     }, 3000);
   });
 }

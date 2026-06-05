@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.YtdlArchive.Metadata;
+using Jellyfin.Plugin.YtdlArchive.Services;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Providers;
 
@@ -6,6 +7,13 @@ namespace Jellyfin.Plugin.YtdlArchive.Providers;
 
 public sealed class YtdlMusicAlbumLocalProvider : ILocalMetadataProvider<MusicAlbum>
 {
+    private readonly ChannelSubscriptionManager? _subscriptions;
+
+    public YtdlMusicAlbumLocalProvider(ChannelSubscriptionManager? subscriptions = null)
+    {
+        _subscriptions = subscriptions;
+    }
+
     public string Name => Constants.PluginName;
 
     public async Task<MetadataResult<MusicAlbum>> GetMetadata(
@@ -23,12 +31,21 @@ public sealed class YtdlMusicAlbumLocalProvider : ILocalMetadataProvider<MusicAl
         var channelName = metadata.ChannelName ?? folderName;
         var albumName = FirstNonBlank(metadata.Album, folderName, channelName);
         var artistName = FirstNonBlank(metadata.Artist, channelName, albumName);
+        var overview = metadata.Description;
+        var subscription = _subscriptions is null
+            ? null
+            : await _subscriptions.FindByChannelIdAsync(metadata.ChannelId, cancellationToken).ConfigureAwait(false);
+        if (subscription is not null)
+        {
+            overview = YtdlSubscriptionStatus.AppendToOverview(overview, subscription);
+        }
+
         var item = new MusicAlbum
         {
             Name = albumName,
             AlbumArtists = NonBlank(artistName),
             Artists = NonBlank(artistName),
-            Overview = metadata.Description,
+            Overview = overview,
             PremiereDate = metadata.ReleaseDate?.UtcDateTime,
             ProductionYear = metadata.ReleaseDate?.Year,
             Genres = metadata.Categories.ToArray(),
@@ -64,4 +81,5 @@ public sealed class YtdlMusicAlbumLocalProvider : ILocalMetadataProvider<MusicAl
         var bracket = value.LastIndexOf('[');
         return bracket > 0 ? value[..bracket].Trim() : value;
     }
+
 }

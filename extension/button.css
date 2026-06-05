@@ -8,7 +8,8 @@
   position: relative;
 }
 
-#ytdl-btn {
+#ytdl-btn,
+#ytdl-subscribe-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -32,26 +33,41 @@
 #ytdl-btn:hover  { background: #a80000; }
 #ytdl-btn:active { transform: scale(0.97); }
 
-#ytdl-btn.loading {
+#ytdl-subscribe-btn {
+  background: #065fd4;
+  padding: 0 10px;
+}
+
+#ytdl-subscribe-btn:hover { background: #0356c5; }
+#ytdl-subscribe-btn:active { transform: scale(0.97); }
+
+#ytdl-btn.loading,
+#ytdl-subscribe-btn.loading {
   background: #888;
   pointer-events: none;
 }
 
-#ytdl-btn.done {
+#ytdl-btn.done,
+#ytdl-subscribe-btn.done {
   background: #2e7d32;
   pointer-events: none;
 }
 
-#ytdl-btn.error {
+#ytdl-btn.error,
+#ytdl-subscribe-btn.error {
   background: #b71c1c;
 }
 
-#ytdl-btn .ytdl-icon { font-size: 15px; line-height: 1; }
-#ytdl-btn .ytdl-text { font-size: 12px; }
+#ytdl-btn .ytdl-icon,
+#ytdl-subscribe-btn .ytdl-icon { font-size: 15px; line-height: 1; }
+
+#ytdl-btn .ytdl-text,
+#ytdl-subscribe-btn .ytdl-text { font-size: 12px; }
 
 /* ── Quality picker dropdown ── */
 
-#ytdl-picker {
+#ytdl-picker,
+.ytdl-picker {
   display: none;
   position: absolute;
   bottom: calc(100% + 8px);
@@ -73,20 +89,24 @@
   box-sizing: border-box;
 }
 
-#ytdl-picker::-webkit-scrollbar {
+#ytdl-picker::-webkit-scrollbar,
+.ytdl-picker::-webkit-scrollbar {
   width: 8px;
 }
 
-#ytdl-picker::-webkit-scrollbar-thumb {
+#ytdl-picker::-webkit-scrollbar-thumb,
+.ytdl-picker::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,0.26);
   border-radius: 999px;
 }
 
-#ytdl-picker::-webkit-scrollbar-track {
+#ytdl-picker::-webkit-scrollbar-track,
+.ytdl-picker::-webkit-scrollbar-track {
   background: transparent;
 }
 
-#ytdl-picker.open { display: block; }
+#ytdl-picker.open,
+.ytdl-picker.open { display: block; }
 
 .ytdl-pick-section {
   padding: 3px 0 6px;
