@@ -219,103 +219,7 @@ public sealed class DownloaderHostedService : BackgroundService
 
         try
         {
-            if (IsRoute(method, path, "GET", "/ping"))
-            {
-                await SendJsonAsync(context.Response, 200, new
-                {
-                    ok = true,
-                    embedded = true,
-                    serverUrl = EffectiveAdvertisedServerUrl(),
-                    lanBrowserAccess = Plugin.Instance?.Configuration.EnableLanBrowserAccess == true,
-                    ytdlp = _ytdlpPath ?? "not found",
-                    ytdlpVersion = _ytdlpVersion,
-                    managedYtdlp = _ytdlpPath == _ytdlpManager.ManagedPath,
-                    downloadDir = DownloadDirectory,
-                    musicDownloadDir = MusicDownloadDirectory,
-                    podcastDownloadDir = ArchiveSettings.PodcastDownloadDirectory,
-                    audiobookDownloadDir = ArchiveSettings.AudiobookDownloadDirectory,
-                    otherDownloadDir = ArchiveSettings.OtherDownloadDirectory,
-                    jellyfin = new
-                    {
-                        enabled = true,
-                        musicLibraryName = ArchiveSettings.MusicLibraryName,
-                        musicLibraryType = "music",
-                        podcastLibraryName = ArchiveSettings.PodcastLibraryName,
-                        podcastLibraryType = "music",
-                        audiobookLibraryName = ArchiveSettings.AudiobookLibraryName,
-                        audiobookLibraryType = "books",
-                        otherLibraryName = ArchiveSettings.OtherLibraryName,
-                        otherLibraryType = "tvshows"
-                    }
-                }, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/save-types"))
-            {
-                await SendJsonAsync(context.Response, 200, new
-                {
-                    saveTypes = SaveTypes,
-                    defaults = new
-                    {
-                        music = ArchiveSettings.MusicLibraryName,
-                        podcast = ArchiveSettings.PodcastLibraryName,
-                        audiobook = ArchiveSettings.AudiobookLibraryName,
-                        other = ArchiveSettings.OtherLibraryName
-                    }
-                }, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/status"))
-            {
-                await SendJsonAsync(context.Response, 200, _active, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/download"))
-            {
-                await QueueDownloadFromRequestAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/subscriptions"))
-            {
-                await ListSubscriptionsAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/subscriptions"))
-            {
-                await SubscribeAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/directories"))
-            {
-                await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/extension/config"))
-            {
-                await WriteBrowserExtensionConfigAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "GET", "/extension/zip"))
-            {
-                await SendBrowserExtensionZipAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (IsRoute(method, path, "POST", "/libraries/reconcile"))
-            {
-                await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            await SendJsonAsync(context.Response, 404, new { error = "Not found" }, cancellationToken).ConfigureAwait(false);
+            await HandleAuthorizedAsync(context, method, path, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -325,6 +229,108 @@ public sealed class DownloaderHostedService : BackgroundService
                 await SendJsonAsync(context.Response, 500, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task HandleAuthorizedAsync(HttpListenerContext context, string method, string? path, CancellationToken cancellationToken)
+    {
+        if (IsRoute(method, path, "GET", "/ping"))
+        {
+            await SendPingAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/save-types"))
+        {
+            await SendSaveTypesAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/status"))
+        {
+            await SendJsonAsync(context.Response, 200, _active, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/download"))
+        {
+            await QueueDownloadFromRequestAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/subscriptions"))
+        {
+            await ListSubscriptionsAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/subscriptions"))
+        {
+            await SubscribeAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await HandleAuthorizedAdminAsync(context, method, path, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleAuthorizedAdminAsync(HttpListenerContext context, string method, string? path, CancellationToken cancellationToken)
+    {
+        if (IsRoute(method, path, "POST", "/directories"))
+        {
+            await CreateDirectoryAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/extension/config"))
+        {
+            await WriteBrowserExtensionConfigAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "GET", "/extension/zip"))
+        {
+            await SendBrowserExtensionZipAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else if (IsRoute(method, path, "POST", "/libraries/reconcile"))
+        {
+            await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await SendJsonAsync(context.Response, 404, new { error = "Not found" }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task SendPingAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        await SendJsonAsync(context.Response, 200, new
+        {
+            ok = true,
+            embedded = true,
+            serverUrl = EffectiveAdvertisedServerUrl(),
+            lanBrowserAccess = Plugin.Instance?.Configuration.EnableLanBrowserAccess == true,
+            ytdlp = _ytdlpPath ?? "not found",
+            ytdlpVersion = _ytdlpVersion,
+            managedYtdlp = _ytdlpPath == _ytdlpManager.ManagedPath,
+            downloadDir = DownloadDirectory,
+            musicDownloadDir = MusicDownloadDirectory,
+            podcastDownloadDir = ArchiveSettings.PodcastDownloadDirectory,
+            audiobookDownloadDir = ArchiveSettings.AudiobookDownloadDirectory,
+            otherDownloadDir = ArchiveSettings.OtherDownloadDirectory,
+            jellyfin = new
+            {
+                enabled = true,
+                musicLibraryName = ArchiveSettings.MusicLibraryName,
+                musicLibraryType = "music",
+                podcastLibraryName = ArchiveSettings.PodcastLibraryName,
+                podcastLibraryType = "music",
+                audiobookLibraryName = ArchiveSettings.AudiobookLibraryName,
+                audiobookLibraryType = "books",
+                otherLibraryName = ArchiveSettings.OtherLibraryName,
+                otherLibraryType = "tvshows"
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SendSaveTypesAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        await SendJsonAsync(context.Response, 200, new
+        {
+            saveTypes = SaveTypes,
+            defaults = new
+            {
+                music = ArchiveSettings.MusicLibraryName,
+                podcast = ArchiveSettings.PodcastLibraryName,
+                audiobook = ArchiveSettings.AudiobookLibraryName,
+                other = ArchiveSettings.OtherLibraryName
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task CreateDirectoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
