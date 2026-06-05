@@ -94,12 +94,14 @@ public sealed class ChannelSubscriptionManager
             ChapterPercent = request.ChapterPercent,
             CreatedUtc = now,
             LastCheckedUtc = now,
-            SeenVideoIds = recent
-                .Select(video => video.Id)
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(RecentVideoLimit)
-                .ToList()
+            SeenVideoIds = request.DownloadExistingVideos
+                ? []
+                : recent
+                    .Select(video => video.Id)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(RecentVideoLimit)
+                    .ToList()
         };
 
         await _storeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -110,10 +112,14 @@ public sealed class ChannelSubscriptionManager
             if (index >= 0)
             {
                 subscription.CreatedUtc = store.Subscriptions[index].CreatedUtc;
-                subscription.SeenVideoIds = store.Subscriptions[index].SeenVideoIds
-                    .Union(subscription.SeenVideoIds, StringComparer.OrdinalIgnoreCase)
-                    .Take(50)
-                    .ToList();
+                if (!request.DownloadExistingVideos)
+                {
+                    subscription.SeenVideoIds = store.Subscriptions[index].SeenVideoIds
+                        .Union(subscription.SeenVideoIds, StringComparer.OrdinalIgnoreCase)
+                        .Take(50)
+                        .ToList();
+                }
+
                 store.Subscriptions[index] = subscription;
             }
             else
@@ -138,6 +144,14 @@ public sealed class ChannelSubscriptionManager
         var seen = subscription.SeenVideoIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return recent
             .Where(video => !string.IsNullOrWhiteSpace(video.Id) && !seen.Contains(video.Id))
+            .Reverse()
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<SubscriptionVideo>> FindExistingVideosAsync(ChannelSubscription subscription, CancellationToken cancellationToken)
+    {
+        var videos = await ReadVideosAsync(subscription.ChannelUrl, playlistEnd: null, cancellationToken).ConfigureAwait(false);
+        return videos
             .Reverse()
             .ToArray();
     }
@@ -203,19 +217,26 @@ public sealed class ChannelSubscriptionManager
     }
 
     private async Task<IReadOnlyList<SubscriptionVideo>> ReadRecentVideosAsync(string channelUrl, CancellationToken cancellationToken)
+        => await ReadVideosAsync(channelUrl, RecentVideoLimit, cancellationToken).ConfigureAwait(false);
+
+    private async Task<IReadOnlyList<SubscriptionVideo>> ReadVideosAsync(string channelUrl, int? playlistEnd, CancellationToken cancellationToken)
     {
         var ytdlp = await RequireYtdlpAsync(cancellationToken).ConfigureAwait(false);
-        var json = await RunYtdlpJsonAsync(
-            ytdlp,
-            [
-                "--flat-playlist",
-                "--dump-single-json",
-                "--playlist-end",
-                RecentVideoLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                "--no-warnings",
-                channelUrl
-            ],
-            cancellationToken).ConfigureAwait(false);
+        var arguments = new List<string>
+        {
+            "--flat-playlist",
+            "--dump-single-json"
+        };
+        if (playlistEnd is not null)
+        {
+            arguments.Add("--playlist-end");
+            arguments.Add(playlistEnd.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        arguments.Add("--no-warnings");
+        arguments.Add(channelUrl);
+
+        var json = await RunYtdlpJsonAsync(ytdlp, arguments, cancellationToken).ConfigureAwait(false);
 
         var playlist = JsonSerializer.Deserialize<YtdlpPlaylist>(json, JsonOptions);
         return playlist?.Entries?
@@ -406,6 +427,8 @@ public sealed class SubscriptionRequest
     public string? Target { get; set; }
 
     public int? ChapterPercent { get; set; }
+
+    public bool DownloadExistingVideos { get; set; }
 }
 
 public sealed class ChannelSubscription

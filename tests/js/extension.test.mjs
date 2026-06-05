@@ -1158,16 +1158,21 @@ test('background script creates context menu save type submenus and queues click
 
   const root = createdMenus.find(menu => menu.id === 'ytdlArchive.sendLink');
   const subscribeRoot = createdMenus.find(menu => menu.id === 'ytdlArchive.subscribeChannel');
+  const subscribeDownloadRoot = createdMenus.find(menu => menu.id === 'ytdlArchive.subscribeChannelAndDownload');
   const audiobookGroup = createdMenus.find(menu => menu.title === 'Audiobook');
   const audiobookItem = createdMenus.find(menu => menu.parentId === audiobookGroup.id && menu.title === 'M4A');
   const subscribeAudiobookGroup = createdMenus.find(menu => menu.parentId === subscribeRoot.id && menu.title === 'Audiobook');
   const subscribeAudiobookItem = createdMenus.find(menu => menu.parentId === subscribeAudiobookGroup.id && menu.title === 'M4A');
+  const subscribeDownloadAudiobookGroup = createdMenus.find(menu => menu.parentId === subscribeDownloadRoot.id && menu.title === 'Audiobook');
+  const subscribeDownloadAudiobookItem = createdMenus.find(menu => menu.parentId === subscribeDownloadAudiobookGroup.id && menu.title === 'M4A');
 
   assert.equal(root.title, 'Send link to ytdl');
-  assert.equal(subscribeRoot.title, 'Subscribe to this channel');
+  assert.equal(subscribeRoot.title, 'Subscribe and get new videos');
+  assert.equal(subscribeDownloadRoot.title, 'Subscribe and get all videos');
   assert.ok(createdMenus.some(menu => menu.title === 'Music'));
   assert.ok(audiobookItem);
   assert.ok(subscribeAudiobookItem);
+  assert.ok(subscribeDownloadAudiobookItem);
 
   clickListener({
     menuItemId: audiobookItem.id,
@@ -1193,15 +1198,31 @@ test('background script creates context menu save type submenus and queues click
       url: 'https://www.youtube.com/watch?v=first',
       quality: 'audio',
       audioFormat: 'mp3',
-      target: 'music'
+      target: 'music',
+      downloadExistingVideos: false
     },
     {
       url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
       quality: 'audio',
       audioFormat: 'm4a',
-      target: 'audiobook'
+      target: 'audiobook',
+      downloadExistingVideos: false
     }
   ]);
+
+  clickListener({
+    menuItemId: subscribeDownloadAudiobookItem.id,
+    pageUrl: 'https://www.youtube.com/watch?v=existing'
+  }, {});
+  await flushAsync();
+
+  assert.deepEqual(subscriptions.at(-1), {
+    url: 'https://www.youtube.com/watch?v=existing',
+    quality: 'audio',
+    audioFormat: 'm4a',
+    target: 'audiobook',
+    downloadExistingVideos: true
+  });
 });
 
 test('background script rejects token fetches for invalid configured URLs', async () => {

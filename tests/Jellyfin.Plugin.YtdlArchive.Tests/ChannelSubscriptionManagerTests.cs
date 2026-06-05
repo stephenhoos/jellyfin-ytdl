@@ -107,6 +107,43 @@ public sealed class ChannelSubscriptionManagerTests
     }
 
     [Fact]
+    public async Task FindExistingVideosAsync_ReadsFullChannelPlaylist()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var ytdlpManager = await CreateYtdlpManagerAsync(directory.FullName, """
+                #!/bin/sh
+                case "$*" in
+                  *--skip-download*) printf '%s\n' '{"channel_id":"UC1234567890123456789012","channel":"Test Channel","channel_url":"https://www.youtube.com/channel/UC1234567890123456789012"}' ;;
+                  *--playlist-end*) printf '%s\n' '{"entries":[{"id":"video-new","title":"Newest"}]}' ;;
+                  *) printf '%s\n' '{"entries":[{"id":"video-new","title":"Newest"},{"id":"video-mid","title":"Middle"},{"id":"video-old","title":"Oldest"}]}' ;;
+                esac
+                """);
+            var manager = new ChannelSubscriptionManager(
+                ytdlpManager,
+                ApplicationPathsProxy.Create(directory.FullName),
+                NullLogger<ChannelSubscriptionManager>.Instance);
+            var subscription = await manager.SubscribeAsync(
+                new SubscriptionRequest
+                {
+                    Url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    Target = "other",
+                    DownloadExistingVideos = true
+                },
+                CancellationToken.None);
+
+            var videos = await manager.FindExistingVideosAsync(subscription, CancellationToken.None);
+
+            Assert.Equal(["video-old", "video-mid", "video-new"], videos.Select(video => video.Id));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PollingService_QueuesNewVideosAndMarksThemSeen()
     {
         var directory = Directory.CreateTempSubdirectory();

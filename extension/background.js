@@ -19,6 +19,7 @@ let contextMenuSaveTypes = [];
 
 const CONTEXT_MENU_ROOT_ID = 'ytdlArchive.sendLink';
 const CONTEXT_MENU_SUBSCRIBE_ROOT_ID = 'ytdlArchive.subscribeChannel';
+const CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID = 'ytdlArchive.subscribeChannelAndDownload';
 const CONTEXT_MENU_CONTEXTS = ['link', 'page', 'video', 'audio'];
 
 function isLocalServerUrl(serverUrl) {
@@ -159,13 +160,19 @@ async function rebuildContextMenus() {
   });
   contextMenuCreate({
     id: CONTEXT_MENU_SUBSCRIBE_ROOT_ID,
-    title: 'Subscribe to this channel',
+    title: 'Subscribe and get new videos',
+    contexts: CONTEXT_MENU_CONTEXTS
+  });
+  contextMenuCreate({
+    id: CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID,
+    title: 'Subscribe and get all videos',
     contexts: CONTEXT_MENU_CONTEXTS
   });
 
   groupedSaveTypes(contextMenuSaveTypes).forEach((items, target) => {
     const groupId = `${CONTEXT_MENU_ROOT_ID}.${target || 'other'}`;
     const subscribeGroupId = `${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.${target || 'other'}`;
+    const subscribeDownloadGroupId = `${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.${target || 'other'}`;
     contextMenuCreate({
       id: groupId,
       parentId: CONTEXT_MENU_ROOT_ID,
@@ -175,6 +182,12 @@ async function rebuildContextMenus() {
     contextMenuCreate({
       id: subscribeGroupId,
       parentId: CONTEXT_MENU_SUBSCRIBE_ROOT_ID,
+      title: targetGroupLabel(target),
+      contexts: CONTEXT_MENU_CONTEXTS
+    });
+    contextMenuCreate({
+      id: subscribeDownloadGroupId,
+      parentId: CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID,
       title: targetGroupLabel(target),
       contexts: CONTEXT_MENU_CONTEXTS
     });
@@ -190,6 +203,12 @@ async function rebuildContextMenus() {
       contextMenuCreate({
         id: `${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.type.${index}`,
         parentId: subscribeGroupId,
+        title: contextMenuLabel(saveType),
+        contexts: CONTEXT_MENU_CONTEXTS
+      });
+      contextMenuCreate({
+        id: `${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.type.${index}`,
+        parentId: subscribeDownloadGroupId,
         title: contextMenuLabel(saveType),
         contexts: CONTEXT_MENU_CONTEXTS
       });
@@ -247,9 +266,10 @@ async function queueContextMenuDownload(info, tab) {
   });
 }
 
-async function queueContextMenuSubscription(info, tab) {
+async function queueContextMenuSubscription(info, tab, downloadExistingVideos = false) {
   const menuItemId = String(info.menuItemId || '');
-  const index = contextMenuSaveTypeIndex(CONTEXT_MENU_SUBSCRIBE_ROOT_ID, menuItemId);
+  const rootId = downloadExistingVideos ? CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID : CONTEXT_MENU_SUBSCRIBE_ROOT_ID;
+  const index = contextMenuSaveTypeIndex(rootId, menuItemId);
   if (index === null) {
     return;
   }
@@ -267,7 +287,10 @@ async function queueContextMenuSubscription(info, tab) {
   await authorizedFetch('/subscriptions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: contextMenuRequestBody(url, saveType)
+    body: JSON.stringify({
+      ...JSON.parse(contextMenuRequestBody(url, saveType)),
+      downloadExistingVideos
+    })
   }).catch((error) => {
     console.warn('YtdlArchive context menu subscription failed.', error);
     throw error;
@@ -287,10 +310,16 @@ if (chrome.contextMenus) {
   });
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     const menuItemId = String(info.menuItemId || '');
-    const action = menuItemId.startsWith(`${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.type.`)
-      ? queueContextMenuSubscription
-      : queueContextMenuDownload;
-    action(info, tab).catch((error) => {
+    let action;
+    if (menuItemId.startsWith(`${CONTEXT_MENU_SUBSCRIBE_ROOT_ID}.type.`)) {
+      action = () => queueContextMenuSubscription(info, tab);
+    } else if (menuItemId.startsWith(`${CONTEXT_MENU_SUBSCRIBE_DOWNLOAD_ROOT_ID}.type.`)) {
+      action = () => queueContextMenuSubscription(info, tab, true);
+    } else {
+      action = () => queueContextMenuDownload(info, tab);
+    }
+
+    action().catch((error) => {
       console.warn('YtdlArchive context menu action failed.', error);
     });
   });

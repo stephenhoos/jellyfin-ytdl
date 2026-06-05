@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -302,6 +303,12 @@ public sealed class DownloaderHostedService : BackgroundService
                 return;
             }
 
+            if (IsRoute(method, path, "GET", "/extension/zip"))
+            {
+                await SendBrowserExtensionZipAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (IsRoute(method, path, "POST", "/libraries/reconcile"))
             {
                 await ReconcileLibrariesAsync(context, cancellationToken).ConfigureAwait(false);
@@ -496,7 +503,10 @@ public sealed class DownloaderHostedService : BackgroundService
         try
         {
             var subscription = await _subscriptions.SubscribeAsync(request, cancellationToken).ConfigureAwait(false);
-            await SendJsonAsync(context.Response, 200, new { subscribed = true, subscription }, cancellationToken).ConfigureAwait(false);
+            var queuedExisting = request.DownloadExistingVideos
+                ? await QueueExistingSubscriptionVideosAsync(subscription, cancellationToken).ConfigureAwait(false)
+                : Array.Empty<object>();
+            await SendJsonAsync(context.Response, 200, new { subscribed = true, subscription, queuedExisting }, cancellationToken).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
@@ -506,6 +516,36 @@ public sealed class DownloaderHostedService : BackgroundService
         {
             await SendJsonAsync(context.Response, 500, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task<IReadOnlyList<object>> QueueExistingSubscriptionVideosAsync(ChannelSubscription subscription, CancellationToken cancellationToken)
+    {
+        var videos = await _subscriptions.FindExistingVideosAsync(subscription, cancellationToken).ConfigureAwait(false);
+        var queuedIds = new List<string>();
+        var results = new List<object>();
+        foreach (var video in videos)
+        {
+            var result = await QueueDownloadAsync(
+                new DownloadQueueRequest(video.Url, subscription.Quality, subscription.AudioFormat, subscription.Target, subscription.ChapterPercent),
+                cancellationToken).ConfigureAwait(false);
+            if (result.Queued)
+            {
+                queuedIds.Add(video.Id);
+            }
+
+            results.Add(new
+            {
+                video.Id,
+                video.Title,
+                video.Url,
+                queued = result.Queued,
+                reason = result.Reason,
+                error = result.Error
+            });
+        }
+
+        await _subscriptions.MarkCheckedAsync(subscription, queuedIds, cancellationToken).ConfigureAwait(false);
+        return results;
     }
 
     private async Task RunDownloadAsync(string url, string quality, string? audioFormat, string target, int? chapterPercent, CancellationToken cancellationToken)
@@ -889,6 +929,38 @@ public sealed class DownloaderHostedService : BackgroundService
             extensionDirectory = result.ExtensionDirectory,
             configPath = result.ConfigPath
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SendBrowserExtensionZipAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        var result = await WriteBrowserExtensionConfigFileAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            await SendJsonAsync(context.Response, 503, new { error = "Browser API token is not available" }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await using var archiveStream = new MemoryStream();
+        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var path in Directory.EnumerateFiles(result.ExtensionDirectory)
+                .Where(path => !Path.GetFileName(path).StartsWith("._", StringComparison.Ordinal))
+                .Order(StringComparer.OrdinalIgnoreCase))
+            {
+                var entry = archive.CreateEntry(Path.GetFileName(path), CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var fileStream = File.OpenRead(path);
+                await fileStream.CopyToAsync(entryStream, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        var bytes = archiveStream.ToArray();
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = "attachment; filename=\"YtdlArchive-ChromeExtension.zip\"";
+        context.Response.ContentLength64 = bytes.Length;
+        await context.Response.OutputStream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+        context.Response.Close();
     }
 
     private static async Task TryWriteBrowserExtensionConfigFileAsync(CancellationToken cancellationToken)

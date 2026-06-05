@@ -231,6 +231,7 @@ public sealed class DownloaderHostedServiceTests
     [InlineData("POST", "/download", """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"flac"}""")]
     [InlineData("POST", "/directories", """{"parent":"","name":""}""")]
     [InlineData("POST", "/extension/config", "{}")]
+    [InlineData("GET", "/extension/zip", null)]
     [InlineData("POST", "/libraries/reconcile", "{}")]
     public async Task HandleAsync_RoutesKnownApiRequests(string method, string path, string? body)
     {
@@ -352,11 +353,13 @@ public sealed class DownloaderHostedServiceTests
                 service,
                 "POST",
                 "/subscriptions",
-                """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"mp3","target":"music"}""");
+                """{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"audio","audioFormat":"mp3","target":"music","downloadExistingVideos":true}""");
             var (getStatus, getBody) = await SendToHandlerAsync(service, "GET", "/subscriptions", null);
 
             Assert.Equal(200, postStatus);
             Assert.Contains("\"subscribed\":true", postBody, StringComparison.Ordinal);
+            Assert.Contains("\"queuedExisting\":[", postBody, StringComparison.Ordinal);
+            Assert.Contains("\"queued\":true", postBody, StringComparison.Ordinal);
             Assert.Equal(200, getStatus);
             Assert.Contains("Test Channel", getBody, StringComparison.Ordinal);
             Assert.Contains("subscriptions.json", getBody, StringComparison.Ordinal);
